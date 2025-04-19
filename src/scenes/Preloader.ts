@@ -17,6 +17,6 @@ export class Preloader extends Scene {
     }
 
     create() {
-        this.scene.start(SCENE_KEYS.TITLE);
+        this.scene.start(SCENE_KEYS.GAME);
     }
 }
