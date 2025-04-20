@@ -220,7 +220,7 @@ export class Game extends Scene {
         let isCardFromDiscardPile = false
         const tableauPileIndex = gameObject.getData('pileIndex') as number | undefined
         if (tableauPileIndex === undefined) {
-            isValidMove = this.solitaire.playDiscardPileToFoundation()
+            isValidMove = this.solitaire.playDiscardPileCardToFoundation()
         } else {
             isValidMove = this.solitaire.moveTableauCardToFoundation(tableauPileIndex)
         }
@@ -229,7 +229,7 @@ export class Game extends Scene {
         }
 
         if (isCardFromDiscardPile) {
-            this.updateCardGameObjectInDescardPile()
+            this.updateCardGameObjectInDiscardPile()
         } else {
             this.handleRevealingNewTableauCards(tableauPileIndex as number)
         }
@@ -248,10 +248,10 @@ export class Game extends Scene {
         const tableauPileIndex = gameObject.getData('pileIndex') as number | undefined
         const tableauCardIndex = gameObject.getData('cardIndex') as number
         if (tableauPileIndex === undefined) {
-            isValidMove = this.solitaire.playDiscardPileToTableau(targetTableauPileIndex)
+            isValidMove = this.solitaire.playDiscardPileCardToTableau(targetTableauPileIndex)
             isCardFromDiscardPile = true
         } else {
-            isValidMove = this.solitaire.moveTableauCardToAnotherTableau(tableauPileIndex, tableauCardIndex, targetTableauPileIndex)
+            isValidMove = this.solitaire.moveTableauCardsToAnotherTableau(tableauPileIndex, tableauCardIndex, targetTableauPileIndex)
         }
 
         if (!isValidMove) {
@@ -263,7 +263,7 @@ export class Game extends Scene {
             card.setFrame(gameObject.frame)
             this.tableauContainers[targetTableauPileIndex].add(card)
 
-            this.updateCardGameObjectInDescardPile()
+            this.updateCardGameObjectInDiscardPile()
             return
         }
         const numberOfCardsToMove = this.getNumberOfCardsToMoveAsPartOfStack(tableauPileIndex as number, tableauCardIndex)
@@ -279,7 +279,7 @@ export class Game extends Scene {
         this.handleRevealingNewTableauCards(tableauPileIndex as number)
     }
 
-    updateCardGameObjectInDescardPile() {
+    updateCardGameObjectInDiscardPile() {
         this.discardPileCards[1].setFrame(this.discardPileCards[0].frame).setVisible(this.discardPileCards[0].visible)
         this.discardPileCards[0].setVisible(false)
     }
