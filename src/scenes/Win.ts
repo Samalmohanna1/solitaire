@@ -1,16 +1,17 @@
 import { Scene, GameObjects } from 'phaser';
 import { ASSET_KEYS, SCENE_KEYS } from './Commons';
 
-export class Title extends Scene {
+export class Win extends Scene {
     start: GameObjects.Image;
 
     constructor() {
-        super({ key: SCENE_KEYS.TITLE });
+        super({ key: SCENE_KEYS.WIN });
     }
 
     create() {
-        this.add.image(0, 0, ASSET_KEYS.TITLE).setOrigin(0);
-        this.start = this.add.image(this.scale.width / 2, this.scale.height / 2 + 350, ASSET_KEYS.CLICK_TO_START).setInteractive({ useHandCursor: true }).setOrigin(.5)
+        this.cameras.main.fadeIn(1000)
+        this.add.image(0, 0, ASSET_KEYS.WIN).setOrigin(0);
+        this.start = this.add.image(this.scale.width / 2, this.scale.height / 2 + 350, ASSET_KEYS.PLAY_AGAIN).setInteractive({ useHandCursor: true }).setOrigin(.5)
 
 
         this.start.on('pointerdown', () => {
