@@ -14,8 +14,12 @@ export class Title extends Scene {
 
 
         this.start.on('pointerdown', () => {
-
-            this.scene.start(SCENE_KEYS.GAME);
+            this.cameras.main.fadeOut(1000, 0, 0, 0, (camera: Phaser.Cameras.Scene2D.Camera, progress: number) => {
+                if (progress !== 1) {
+                    return
+                }
+                this.scene.start(SCENE_KEYS.GAME);
+            })
 
         });
     }
