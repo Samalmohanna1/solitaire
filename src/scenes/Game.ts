@@ -5,16 +5,16 @@ import { Card } from '../lib/card';
 import { FoundationPile } from '../lib/foundationPile';
 
 const DEBUG = false;
-const SCALE = 1.5;
+const SCALE = 1;
 const CARD_BACK_FRAME = 52;
-const FOUNDATION_PILE_X_POSITIONS = [360, 425, 490, 555];
-const FOUNDATION_PILE_Y_POSITION = 5;
-const DISCARD_PILE_X_POSITION = 85;
-const DISCARD_PILE_Y_POSITION = 5;
-const DRAW_PILE_X_POSITION = 5;
-const DRAW_PILE_Y_POSITION = 5;
-const TABLEAU_PILE_X_POSITION = 40;
-const TABLEAU_PILE_Y_POSITION = 92;
+const FOUNDATION_PILE_X_POSITIONS = [1046, 1187, 1328, 1469];
+const FOUNDATION_PILE_Y_POSITION = 30;
+const DISCARD_PILE_X_POSITION = 482;
+const DISCARD_PILE_Y_POSITION = 30;
+const DRAW_PILE_X_POSITION = 340;
+const DRAW_PILE_Y_POSITION = 30;
+const TABLEAU_PILE_X_POSITION = 340;
+const TABLEAU_PILE_Y_POSITION = 260;
 const SUIT_FRAMES = {
     HEART: 26,
     DIAMOND: 13,
@@ -63,7 +63,7 @@ export class Game extends Phaser.Scene {
         }
 
         const drawZone = this.add
-            .zone(0, 0, CARD_WIDTH * SCALE + 20, CARD_HEIGHT * SCALE + 12)
+            .zone(DRAW_PILE_X_POSITION, DRAW_PILE_Y_POSITION, CARD_WIDTH * SCALE + 20, CARD_HEIGHT * SCALE + 12)
             .setOrigin(0)
             .setInteractive();
 
@@ -114,7 +114,7 @@ export class Game extends Phaser.Scene {
         this.#tableauContainers = [];
 
         this.#solitaire.tableauPiles.forEach((pile, pileIndex) => {
-            const x = TABLEAU_PILE_X_POSITION + pileIndex * 85;
+            const x = TABLEAU_PILE_X_POSITION + pileIndex * 186;
             const tableauContainer = this.add.container(x, TABLEAU_PILE_Y_POSITION, []);
             this.#tableauContainers.push(tableauContainer);
             pile.forEach((card, cardIndex) => {
@@ -129,7 +129,7 @@ export class Game extends Phaser.Scene {
     }
 
     #drawCardLocationBox(x: number, y: number): void {
-        this.add.rectangle(x, y, 56, 78).setOrigin(0).setStrokeStyle(2, 0x000000, 0.5);
+        this.add.rectangle(x, y, 111, 156).setOrigin(0).setStrokeStyle(2, 0x0E0D0D, 0.5);
     }
 
     #createCard(
@@ -239,25 +239,25 @@ export class Game extends Phaser.Scene {
     }
 
     #createDropZones(): void {
-        let zone = this.add.zone(350, 0, 270, 85).setOrigin(0).setRectangleDropZone(270, 85).setData({
+        let zone = this.add.zone(FOUNDATION_PILE_X_POSITIONS[0], FOUNDATION_PILE_Y_POSITION, (CARD_WIDTH * 4 + 30 * 3), 156).setOrigin(0).setRectangleDropZone(270, 85).setData({
             zoneType: ZONE_TYPE.FOUNDATION,
         });
         if (DEBUG) {
-            this.add.rectangle(350, 0, zone.width, zone.height, 0xff0000, 0.2).setOrigin(0);
+            this.add.rectangle(zone.x, zone.y, zone.width, zone.height, 0xff0000, 0.2).setOrigin(0);
         }
 
         for (let i = 0; i < 7; i += 1) {
             zone = this.add
-                .zone(30 + i * 85, 92, 75.5, 585)
+                .zone(TABLEAU_PILE_X_POSITION + i * 186, TABLEAU_PILE_Y_POSITION, 120, 585)
                 .setOrigin(0)
-                .setRectangleDropZone(75.5, 585)
+                .setRectangleDropZone(120, 585)
                 .setData({
                     zoneType: ZONE_TYPE.TABLEAU,
                     tableauIndex: i,
                 })
                 .setDepth(-1);
             if (DEBUG) {
-                this.add.rectangle(30 + i * 85, 92, zone.width, zone.height, 0xff0000, 0.5).setOrigin(0);
+                this.add.rectangle(zone.x, zone.y, zone.width, zone.height, 0xff0000, 0.5).setOrigin(0);
             }
         }
     }
@@ -394,6 +394,15 @@ export class Game extends Phaser.Scene {
 
             this.#foundationPileCards[pileIndex].setVisible(true).setFrame(this.#getCardFrame(pile));
         });
+        if (this.#solitaire.wonGame) {
+
+            this.cameras.main.fadeOut(1000, 0, 0, 0, (camera: Phaser.Cameras.Scene2D.Camera, progress: number) => {
+                if (progress !== 1) {
+                    return
+                }
+                this.scene.start(SCENE_KEYS.WIN);
+            })
+        }
     }
 
     #showCardsInDrawPile(): void {
