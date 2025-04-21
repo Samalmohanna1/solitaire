@@ -39,6 +39,7 @@ export class Game extends Phaser.Scene {
     }
 
     public create(): void {
+        this.cameras.main.fadeIn(1000)
         this.#solitaire = new Solitaire();
         this.#solitaire.newGame();
 
