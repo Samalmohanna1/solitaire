@@ -11,7 +11,7 @@ export class Win extends Scene {
     create() {
         this.cameras.main.fadeIn(1000)
         this.add.image(0, 0, ASSET_KEYS.WIN).setOrigin(0);
-        this.start = this.add.image(this.scale.width / 2, this.scale.height / 2 + 350, ASSET_KEYS.PLAY_AGAIN).setInteractive({ useHandCursor: true }).setOrigin(.5)
+        this.start = this.add.image(240, this.scale.height / 2 + 200, ASSET_KEYS.PLAY_AGAIN).setInteractive({ useHandCursor: true }).setOrigin(0, .5)
 
 
         this.start.on('pointerdown', () => {
