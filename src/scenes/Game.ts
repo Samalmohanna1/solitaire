@@ -182,7 +182,7 @@ export class Game extends Phaser.Scene {
             Phaser.Input.Events.DRAG,
             (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.Image, dragX: number, dragY: number) => {
                 gameObject.setPosition(dragX, dragY)
-                gameObject.setDepth(0)
+                gameObject.setDepth(50)
 
                 const tableauPileIndex = gameObject.getData('pileIndex') as number | undefined
                 const cardIndex = gameObject.getData('cardIndex') as number
