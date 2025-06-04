@@ -23,6 +23,8 @@ const SUIT_FRAMES = {
     SPADE: 39,
     CLUB: 0,
 }
+let numberOfMoves = 0
+
 type ZoneType = keyof typeof ZONE_TYPE
 const ZONE_TYPE = {
     FOUNDATION: 'FOUNDATION',
@@ -35,6 +37,7 @@ export class Game extends Phaser.Scene {
     #discardPileCards!: Phaser.GameObjects.Image[]
     #foundationPileCards!: Phaser.GameObjects.Image[]
     #tableauContainers!: Phaser.GameObjects.Container[]
+    moveCounterText: Phaser.GameObjects.Text
 
     constructor() {
         super({ key: SCENE_KEYS.GAME })
@@ -54,6 +57,9 @@ export class Game extends Phaser.Scene {
         this.#createDropZones()
 
         this.add.image(0, 0, ASSET_KEYS.TABLE).setOrigin(0).setDepth(-1)
+
+        this.moveCounterText = this.add.text(DRAW_PILE_X_POSITION, TABLEAU_PILE_SPACER_Y + 990, 'Moves: ' + numberOfMoves,
+            { fontSize: 34, fontStyle: 'bold', color: '#FFFFEF' })
     }
 
     #createDrawPile(): void {
@@ -78,6 +84,8 @@ export class Game extends Phaser.Scene {
                 this.#solitaire.shuffleDiscardPile()
                 this.#discardPileCards.forEach((card) => card.setVisible(false))
                 this.#showCardsInDrawPile()
+                numberOfMoves += 1
+                this.moveCounterText.setText('Moves: ' + numberOfMoves);
                 return
             }
 
@@ -86,6 +94,8 @@ export class Game extends Phaser.Scene {
             this.#discardPileCards[0].setFrame(this.#discardPileCards[1].frame).setVisible(this.#discardPileCards[1].visible)
             const card = this.#solitaire.discardPile[this.#solitaire.discardPile.length - 1]
             this.#discardPileCards[1].setFrame(this.#getCardFrame(card)).setVisible(true)
+            numberOfMoves += 1
+            this.moveCounterText.setText('Moves: ' + numberOfMoves);
         })
 
         if (DEBUG) {
@@ -293,6 +303,9 @@ export class Game extends Phaser.Scene {
 
         if (!isValidMove) {
             return
+        } else {
+            numberOfMoves += 1
+            this.moveCounterText.setText('Moves: ' + numberOfMoves);
         }
 
         if (isCardFromDiscardPile) {
@@ -327,6 +340,9 @@ export class Game extends Phaser.Scene {
         }
         if (!isValidMove) {
             return
+        } else {
+            numberOfMoves += 1
+            this.moveCounterText.setText('Moves: ' + numberOfMoves);
         }
 
         if (isCardFromDiscardPile) {
@@ -402,7 +418,7 @@ export class Game extends Phaser.Scene {
                 if (progress !== 1) {
                     return
                 }
-                this.scene.start(SCENE_KEYS.WIN)
+                this.scene.start(SCENE_KEYS.WIN, { moves: numberOfMoves })
             })
         }
     }

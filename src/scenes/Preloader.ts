@@ -7,6 +7,8 @@ export class Preloader extends Scene {
     }
 
     preload() {
+        this.load.font('Raleway', 'fonts/Raleway.ttf')
+
         this.load.image(ASSET_KEYS.TITLE, 'assets/title.png');
         this.load.image(ASSET_KEYS.CLICK_TO_START, 'assets/start.png');
         this.load.image(ASSET_KEYS.TABLE, 'assets/table.png');
