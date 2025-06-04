@@ -7,14 +7,16 @@ export class Win extends Scene {
     start: GameObjects.Image;
     moves: number;
     timer: string;
+    score: number;
 
     constructor() {
         super({ key: SCENE_KEYS.WIN });
     }
 
-    init(data: { moves: number, time: string }) {
+    init(data: { moves: number, time: string, score: number }) {
         this.moves = data.moves
         this.timer = data.time
+        this.score = data.score
     }
 
     create() {
@@ -29,6 +31,8 @@ export class Win extends Scene {
             textStyle).setOrigin(1, 0)
 
         this.add.text(215, this.scale.height / 2 + 40, `Score:       -----------------------`, textStyle)
+        this.add.text(1025, this.scale.height / 2 + 40, `${this.score}`,
+            textStyle).setOrigin(1, 0)
 
         this.add.text(215, this.scale.height / 2 + 100, `Time:        -----------------------`, textStyle)
         this.add.text(1025, this.scale.height / 2 + 100, `${this.timer}`,
