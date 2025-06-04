@@ -52,6 +52,8 @@ export class Game extends Phaser.Scene {
     timerText!: Phaser.GameObjects.Text;
     timerRunning: boolean = false;
     elapsedTime: number = 0;
+    score: number = 0;
+    scoreText!: Phaser.GameObjects.Text
 
     constructor() {
         super({ key: SCENE_KEYS.GAME })
@@ -72,11 +74,13 @@ export class Game extends Phaser.Scene {
 
         this.elapsedTime = 0;
         this.timerRunning = true;
+        this.score = 0
+        this.scoreText = this.add.text(760, TABLEAU_PILE_SPACER_Y + 990, 'Score: 0', textStyle);
 
         this.timerText = this.add.text(460, TABLEAU_PILE_SPACER_Y + 990, 'Time: 00:00', textStyle);
 
         this.timerEvent = this.time.addEvent({
-            delay: 1000,                // 1 second
+            delay: 1000,
             callback: () => {
                 if (this.timerRunning) {
                     this.elapsedTime += 1;
@@ -337,6 +341,8 @@ export class Game extends Phaser.Scene {
         } else {
             numberOfMoves += 1
             this.moveCounterText.setText('Moves: ' + numberOfMoves);
+            this.score += 10
+            this.scoreText.setText('Score: ' + this.score)
         }
 
         if (isCardFromDiscardPile) {
@@ -374,6 +380,10 @@ export class Game extends Phaser.Scene {
         } else {
             numberOfMoves += 1
             this.moveCounterText.setText('Moves: ' + numberOfMoves);
+            if (isCardFromDiscardPile) {
+                this.score += 5;
+                this.scoreText.setText('Score: ' + this.score);
+            }
         }
 
         if (isCardFromDiscardPile) {
@@ -425,6 +435,8 @@ export class Game extends Phaser.Scene {
         this.#tableauContainers[tableauPileIndex].setDepth(0)
         const flipTableauCard = this.#solitaire.flipTopTableauCard(tableauPileIndex)
         if (flipTableauCard) {
+            this.score += 5;
+            this.scoreText.setText('Score: ' + this.score);
             const tableauPile = this.#solitaire.tableauPiles[tableauPileIndex]
             const tableauCard = tableauPile[tableauPile.length - 1]
             const cardGameObject = this.#tableauContainers[tableauPileIndex].getAt<Phaser.GameObjects.Image>(
@@ -451,7 +463,7 @@ export class Game extends Phaser.Scene {
                 if (progress !== 1) {
                     return
                 }
-                this.scene.start(SCENE_KEYS.WIN, { moves: numberOfMoves, time: formatTime(this.elapsedTime) })
+                this.scene.start(SCENE_KEYS.WIN, { moves: numberOfMoves, time: formatTime(this.elapsedTime), score: this.score })
             })
         }
     }
