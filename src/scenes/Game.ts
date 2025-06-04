@@ -24,6 +24,16 @@ const SUIT_FRAMES = {
     CLUB: 0,
 }
 let numberOfMoves = 0
+const textStyle = { font: '34px Raleway', fontStyle: 'bold', color: '#FFFEFF' }
+
+function formatTime(seconds: number): string {
+    const minutes = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    const minutesStr = minutes.toString().padStart(2, '0');
+    const secondsStr = secs.toString().padStart(2, '0');
+    return `${minutesStr}:${secondsStr}`;
+}
+
 
 type ZoneType = keyof typeof ZONE_TYPE
 const ZONE_TYPE = {
@@ -38,6 +48,10 @@ export class Game extends Phaser.Scene {
     #foundationPileCards!: Phaser.GameObjects.Image[]
     #tableauContainers!: Phaser.GameObjects.Container[]
     moveCounterText: Phaser.GameObjects.Text
+    timerEvent!: Phaser.Time.TimerEvent;
+    timerText!: Phaser.GameObjects.Text;
+    timerRunning: boolean = false;
+    elapsedTime: number = 0;
 
     constructor() {
         super({ key: SCENE_KEYS.GAME })
@@ -56,10 +70,27 @@ export class Game extends Phaser.Scene {
         this.#createDragEvents()
         this.#createDropZones()
 
+        this.elapsedTime = 0;
+        this.timerRunning = true;
+
+        this.timerText = this.add.text(460, TABLEAU_PILE_SPACER_Y + 990, 'Time: 00:00', textStyle);
+
+        this.timerEvent = this.time.addEvent({
+            delay: 1000,                // 1 second
+            callback: () => {
+                if (this.timerRunning) {
+                    this.elapsedTime += 1;
+                    this.timerText.setText('Time: ' + formatTime(this.elapsedTime));
+                }
+            },
+            loop: true,
+        });
+
+
         this.add.image(0, 0, ASSET_KEYS.TABLE).setOrigin(0).setDepth(-1)
 
         this.moveCounterText = this.add.text(DRAW_PILE_X_POSITION, TABLEAU_PILE_SPACER_Y + 990, 'Moves: ' + numberOfMoves,
-            { fontSize: 34, fontStyle: 'bold', color: '#FFFFEF' })
+            textStyle)
     }
 
     #createDrawPile(): void {
@@ -413,12 +444,14 @@ export class Game extends Phaser.Scene {
             this.#foundationPileCards[pileIndex].setVisible(true).setFrame(this.#getCardFrame(pile))
         })
         if (this.#solitaire.wonGame) {
+            this.timerRunning = false;
+            this.timerEvent.remove(false);
 
             this.cameras.main.fadeOut(1000, 0, 0, 0, (camera: Phaser.Cameras.Scene2D.Camera, progress: number) => {
                 if (progress !== 1) {
                     return
                 }
-                this.scene.start(SCENE_KEYS.WIN, { moves: numberOfMoves })
+                this.scene.start(SCENE_KEYS.WIN, { moves: numberOfMoves, time: formatTime(this.elapsedTime) })
             })
         }
     }
