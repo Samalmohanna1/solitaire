@@ -6,13 +6,15 @@ const textStyle = { font: '40px Raleway', fontStyle: 'bold', color: '#FFFEFF' }
 export class Win extends Scene {
     start: GameObjects.Image;
     moves: number;
+    timer: string;
 
     constructor() {
         super({ key: SCENE_KEYS.WIN });
     }
 
-    init(data: { moves: number; }) {
+    init(data: { moves: number, time: string }) {
         this.moves = data.moves
+        this.timer = data.time
     }
 
     create() {
@@ -25,8 +27,12 @@ export class Win extends Scene {
             textStyle)
         this.add.text(1025, this.scale.height / 2 - 20, `${this.moves}`,
             textStyle).setOrigin(1, 0)
+
         this.add.text(215, this.scale.height / 2 + 40, `Score:       -----------------------`, textStyle)
+
         this.add.text(215, this.scale.height / 2 + 100, `Time:        -----------------------`, textStyle)
+        this.add.text(1025, this.scale.height / 2 + 100, `${this.timer}`,
+            textStyle).setOrigin(1, 0)
 
 
         this.start.on('pointerdown', () => {
