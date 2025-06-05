@@ -60,7 +60,23 @@ export class Game extends Phaser.Scene {
     }
 
     public create(): void {
-
+        if (!this.sys.game.device.os.desktop) {
+            let lastTap = 0
+            this.input.on('pointerup', (pointer: { event: { timeStamp: any } }) => {
+                let currentTime = pointer.event.timeStamp
+                let tapLength = currentTime - lastTap
+                if (tapLength < 300 && tapLength > 0) {
+                    if (this.scale.isFullscreen) {
+                        this.scale.stopFullscreen()
+                    } else {
+                        this.scale.startFullscreen()
+                    }
+                    lastTap = 0
+                } else {
+                    lastTap = currentTime
+                }
+            })
+        }
 
         this.cameras.main.fadeIn(1000)
         this.#solitaire = new Solitaire()
