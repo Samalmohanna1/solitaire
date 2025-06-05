@@ -60,6 +60,8 @@ export class Game extends Phaser.Scene {
     }
 
     public create(): void {
+
+
         this.cameras.main.fadeIn(1000)
         this.#solitaire = new Solitaire()
         this.#solitaire.newGame()
@@ -75,16 +77,16 @@ export class Game extends Phaser.Scene {
         this.elapsedTime = 0;
         this.timerRunning = true;
         this.score = 0
-        this.scoreText = this.add.text(760, TABLEAU_PILE_SPACER_Y + 990, 'Score: 0', textStyle);
+        this.scoreText = this.add.text(1520, TABLEAU_PILE_SPACER_Y + 980, 'Score: 0', textStyle);
 
-        this.timerText = this.add.text(460, TABLEAU_PILE_SPACER_Y + 990, 'Time: 00:00', textStyle);
+        this.timerText = this.add.text(this.scale.width / 2, TABLEAU_PILE_SPACER_Y + 996, '00:00', { font: '54px Raleway', fontStyle: 'bold', color: '#FFFEFF' }).setOrigin(.5)
 
         this.timerEvent = this.time.addEvent({
             delay: 1000,
             callback: () => {
                 if (this.timerRunning) {
                     this.elapsedTime += 1;
-                    this.timerText.setText('Time: ' + formatTime(this.elapsedTime));
+                    this.timerText.setText('' + formatTime(this.elapsedTime));
                 }
             },
             loop: true,
@@ -92,8 +94,9 @@ export class Game extends Phaser.Scene {
 
 
         this.add.image(0, 0, ASSET_KEYS.TABLE).setOrigin(0).setDepth(-1)
+        this.add.image(this.scale.width / 2, this.scale.height, ASSET_KEYS.BANNER).setOrigin(.5, 1).setDepth(-1)
 
-        this.moveCounterText = this.add.text(DRAW_PILE_X_POSITION, TABLEAU_PILE_SPACER_Y + 990, 'Moves: ' + numberOfMoves,
+        this.moveCounterText = this.add.text(DRAW_PILE_X_POSITION + 80, TABLEAU_PILE_SPACER_Y + 980, 'Moves: ' + numberOfMoves,
             textStyle)
     }
 
@@ -324,6 +327,16 @@ export class Game extends Phaser.Scene {
         )
     }
 
+    #playCardDrop(): void {
+        const cardDropSound = this.sound.get('cardDrop');
+        if (!cardDropSound || !cardDropSound.isPlaying) {
+            this.sound.play('cardDrop', {
+                volume: .8,
+            });
+            console.log('card drop');
+        }
+    }
+
     #handleMoveCardToFoundation(gameObject: Phaser.GameObjects.Image): void {
         let isValidMove = false
         let isCardFromDiscardPile = false
@@ -339,6 +352,7 @@ export class Game extends Phaser.Scene {
         if (!isValidMove) {
             return
         } else {
+            this.#playCardDrop()
             numberOfMoves += 1
             this.moveCounterText.setText('Moves: ' + numberOfMoves);
             this.score += 10
@@ -378,6 +392,7 @@ export class Game extends Phaser.Scene {
         if (!isValidMove) {
             return
         } else {
+            this.#playCardDrop()
             numberOfMoves += 1
             this.moveCounterText.setText('Moves: ' + numberOfMoves);
             if (isCardFromDiscardPile) {
@@ -474,6 +489,7 @@ export class Game extends Phaser.Scene {
             const showCard = cardIndex < numberOfCardsToShow
             card.setVisible(showCard)
         })
+        this.#playCardDrop()
     }
 
     #getCardFrame(data: Card | FoundationPile): number {

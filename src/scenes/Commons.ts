@@ -10,6 +10,7 @@ export const ASSET_KEYS = {
     CLICK_TO_START: 'CLICK_TO_START',
     CARDS: 'CARDS',
     TABLE: 'TABLE',
+    BANNER: 'BANNER',
     WIN: 'WIN',
     PLAY_AGAIN: 'PLAY_AGAIN'
 } as const;
