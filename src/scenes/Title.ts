@@ -11,8 +11,9 @@ export class Title extends Scene {
     create() {
 
         if (!this.sys.game.device.os.desktop) {
+            let rotateText: GameObjects.Text
             if (!this.sys.game.scale.isLandscape) {
-                this.add
+                rotateText = this.add
                     .text(
                         this.scale.width / 2,
                         100,
@@ -26,7 +27,7 @@ export class Title extends Scene {
                     )
                     .setOrigin(0.5).setDepth(20)
             } else if (this.sys.game.scale.isLandscape) {
-                this.add
+                rotateText = this.add
                     .text(
                         this.scale.width / 2,
                         100,
@@ -46,6 +47,7 @@ export class Title extends Scene {
                 let currentTime = pointer.event.timeStamp
                 let tapLength = currentTime - lastTap
                 if (tapLength < 300 && tapLength > 0) {
+                    rotateText.setVisible(false)
                     if (this.scale.isFullscreen) {
                         this.scale.stopFullscreen()
                     } else {

@@ -347,9 +347,8 @@ export class Game extends Phaser.Scene {
         const cardDropSound = this.sound.get('cardDrop');
         if (!cardDropSound || !cardDropSound.isPlaying) {
             this.sound.play('cardDrop', {
-                volume: .8,
+                volume: .7,
             });
-            console.log('card drop');
         }
     }
 
