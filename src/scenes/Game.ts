@@ -53,7 +53,7 @@ export class Game extends Phaser.Scene {
     timerRunning: boolean = false;
     elapsedTime: number = 0;
     score: number = 0;
-    scoreText!: Phaser.GameObjects.Text
+    newGame!: Phaser.GameObjects.Text
 
     constructor() {
         super({ key: SCENE_KEYS.GAME })
@@ -93,7 +93,18 @@ export class Game extends Phaser.Scene {
         this.elapsedTime = 0;
         this.timerRunning = true;
         this.score = 0
-        this.scoreText = this.add.text(1520, TABLEAU_PILE_SPACER_Y + 980, 'Score: 0', textStyle);
+        this.newGame = this.add.text(1520, TABLEAU_PILE_SPACER_Y + 980, 'New Game', textStyle).setInteractive({ useHandCursor: true })
+
+        this.newGame.on('pointerdown', () => {
+            this.cameras.main.fadeOut(1000, 0, 0, 0, (camera: Phaser.Cameras.Scene2D.Camera, progress: number) => {
+                if (progress !== 1) {
+                    return
+                }
+                numberOfMoves = 0;
+                this.scene.start(SCENE_KEYS.GAME);
+            })
+
+        });
 
         this.timerText = this.add.text(this.scale.width / 2, TABLEAU_PILE_SPACER_Y + 996, '00:00', { font: '54px Raleway', fontStyle: 'bold', color: '#FFFEFF' }).setOrigin(.5)
 
@@ -114,6 +125,7 @@ export class Game extends Phaser.Scene {
 
         this.moveCounterText = this.add.text(DRAW_PILE_X_POSITION + 80, TABLEAU_PILE_SPACER_Y + 980, 'Moves: ' + numberOfMoves,
             textStyle)
+
     }
 
     #createDrawPile(): void {
@@ -371,7 +383,6 @@ export class Game extends Phaser.Scene {
             numberOfMoves += 1
             this.moveCounterText.setText('Moves: ' + numberOfMoves);
             this.score += 10
-            this.scoreText.setText('Score: ' + this.score)
         }
 
         if (isCardFromDiscardPile) {
@@ -412,7 +423,6 @@ export class Game extends Phaser.Scene {
             this.moveCounterText.setText('Moves: ' + numberOfMoves);
             if (isCardFromDiscardPile) {
                 this.score += 5;
-                this.scoreText.setText('Score: ' + this.score);
             }
         }
 
@@ -466,7 +476,6 @@ export class Game extends Phaser.Scene {
         const flipTableauCard = this.#solitaire.flipTopTableauCard(tableauPileIndex)
         if (flipTableauCard) {
             this.score += 5;
-            this.scoreText.setText('Score: ' + this.score);
             const tableauPile = this.#solitaire.tableauPiles[tableauPileIndex]
             const tableauCard = tableauPile[tableauPile.length - 1]
             const cardGameObject = this.#tableauContainers[tableauPileIndex].getAt<Phaser.GameObjects.Image>(
