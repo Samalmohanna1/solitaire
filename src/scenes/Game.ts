@@ -502,7 +502,9 @@ export class Game extends Phaser.Scene {
                 if (progress !== 1) {
                     return
                 }
-                this.scene.start(SCENE_KEYS.WIN, { moves: numberOfMoves, time: formatTime(this.elapsedTime), score: this.score })
+                const deduction = Math.floor((this.elapsedTime / 10) * 2)
+                const finalScore = this.score - deduction
+                this.scene.start(SCENE_KEYS.WIN, { moves: numberOfMoves, time: formatTime(this.elapsedTime), score: finalScore })
             })
         }
     }
