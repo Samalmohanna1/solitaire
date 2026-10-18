@@ -201,13 +201,17 @@ export class Solitaire {
         return true;
     }
 
-    public moveTableauCardToFoundation(tableauIndex: number): boolean {
-        // get the last card in the tableau pile that was provided (last element in the pile array)
+    public moveTableauCardToFoundation(tableauIndex: number, cardIndex: number): boolean {
         const tableauPile = this.#tableauPiles[tableauIndex];
         if (tableauPile === undefined) {
             return false;
         }
-        const card = tableauPile[tableauPile.length - 1];
+
+        // only the last card in the tableau pile can be played to a foundation, not a card with other cards stacked on it
+        if (cardIndex !== tableauPile.length - 1) {
+            return false;
+        }
+        const card = tableauPile[cardIndex];
         if (card === undefined) {
             return false;
         }
