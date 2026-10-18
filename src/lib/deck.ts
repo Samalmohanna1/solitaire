@@ -45,8 +45,17 @@ export class Deck {
 
     public reset(): void {
         this.#discardPile = [];
-        this.#drawPile = [...this.#cards];
+        // deal fresh face down cards, since cards from a previous game may have been flipped
+        this.#drawPile = this.#cards.map((card) => new Card(card.suit, card.value));
         this.shuffle();
+    }
+
+    /**
+     * Replaces the draw and discard piles with previously saved ones, used when undoing a move.
+     */
+    public restore(drawPile: Card[], discardPile: Card[]): void {
+        this.#drawPile = drawPile;
+        this.#discardPile = discardPile;
     }
 
     #createDeck(): void {

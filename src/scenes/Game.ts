@@ -50,12 +50,12 @@ export class Game extends Phaser.Scene {
     #foundationPileCards!: Phaser.GameObjects.Image[]
     #tableauContainers!: Phaser.GameObjects.Container[]
     moveCounterText: Phaser.GameObjects.Text
+    scoreText!: Phaser.GameObjects.Text
+    undoButton!: Phaser.GameObjects.Text
     timerEvent!: Phaser.Time.TimerEvent;
     timerText!: Phaser.GameObjects.Text;
     timerRunning: boolean = false;
     elapsedTime: number = 0;
-    score: number = 0;
-    numberOfMoves: number = 0
     newGame!: Phaser.GameObjects.Text
 
     constructor() {
@@ -71,14 +71,13 @@ export class Game extends Phaser.Scene {
         this.#createDiscardPile()
         this.#createFoundationPiles()
         this.#createTableauPiles()
+        this.#renderBoard()
 
         this.#createDragEvents()
         this.#createDropZones()
 
         this.elapsedTime = 0;
         this.timerRunning = true;
-        this.score = 0
-        this.numberOfMoves = 0
         this.newGame = this.add.text(1520, TABLEAU_PILE_SPACER_Y + 980, 'New Game', textStyle).setInteractive({ useHandCursor: true })
 
         this.newGame.on('pointerdown', () => {
@@ -91,7 +90,16 @@ export class Game extends Phaser.Scene {
 
         });
 
-        createFullscreenButton(this, this.newGame.x - 60, this.newGame.y, textStyle)?.setOrigin(1, 0)
+        const fullscreenButton = createFullscreenButton(this, this.newGame.x - 60, this.newGame.y, textStyle)?.setOrigin(1, 0)
+
+        const undoButtonX = (fullscreenButton ? fullscreenButton.x - fullscreenButton.width : this.newGame.x) - 60
+        this.undoButton = this.add.text(undoButtonX, this.newGame.y, 'Undo', textStyle).setOrigin(1, 0).setInteractive({ useHandCursor: true })
+        this.undoButton.on('pointerdown', () => this.#undo())
+        this.input.keyboard?.on('keydown-Z', (event: KeyboardEvent) => {
+            if (event.ctrlKey || event.metaKey) {
+                this.#undo()
+            }
+        })
 
         this.timerText = this.add.text(this.scale.width / 2, TABLEAU_PILE_SPACER_Y + 996, '00:00', { font: '54px Raleway', fontStyle: 'bold', color: '#FFFEFF' }).setOrigin(.5)
 
@@ -101,6 +109,10 @@ export class Game extends Phaser.Scene {
                 if (this.timerRunning) {
                     this.elapsedTime += 1;
                     this.timerText.setText('' + formatTime(this.elapsedTime));
+                    if (this.elapsedTime % 10 === 0) {
+                        this.#solitaire.applyTimePenalty()
+                        this.#updateHud()
+                    }
                 }
             },
             loop: true,
@@ -110,14 +122,27 @@ export class Game extends Phaser.Scene {
         this.add.image(0, 0, ASSET_KEYS.TABLE).setOrigin(0).setDepth(-1)
         this.add.image(this.scale.width / 2, this.scale.height, ASSET_KEYS.BANNER).setOrigin(.5, 1).setDepth(-1)
 
-        this.moveCounterText = this.add.text(DRAW_PILE_X_POSITION + 80, TABLEAU_PILE_SPACER_Y + 980, 'Moves: ' + this.numberOfMoves,
-            textStyle)
-
+        this.moveCounterText = this.add.text(DRAW_PILE_X_POSITION + 80, TABLEAU_PILE_SPACER_Y + 980, '', textStyle)
+        this.scoreText = this.add.text(this.moveCounterText.x + 250, this.moveCounterText.y, '', textStyle)
+        this.#updateHud()
     }
 
-    #incrementMoveCounter(): void {
-        this.numberOfMoves += 1
-        this.moveCounterText.setText('Moves: ' + this.numberOfMoves)
+    #updateHud(): void {
+        this.moveCounterText.setText('Moves: ' + this.#solitaire.numberOfMoves)
+        this.scoreText.setText('Score: ' + this.#solitaire.score)
+        this.undoButton.setAlpha(this.#solitaire.canUndo ? 1 : 0.4)
+    }
+
+    #undo(): void {
+        // the board is redrawn after an undo, which would pull cards out from under a drag in progress
+        const isDragging = this.input.manager.pointers.some((pointer) => this.input.getDragState(pointer) !== 0)
+        if (isDragging || this.#solitaire.wonGame || !this.#solitaire.undo()) {
+            return
+        }
+
+        this.#playCardDrop()
+        this.#renderBoard()
+        this.#updateHud()
     }
 
     #createDrawPile(): void {
@@ -134,24 +159,12 @@ export class Game extends Phaser.Scene {
             .setInteractive()
 
         drawZone.on(Phaser.Input.Events.POINTER_DOWN, () => {
-            if (this.#solitaire.drawPile.length === 0 && this.#solitaire.discardPile.length === 0) {
-                return
+            // once the draw pile runs out, clicking it turns the discard pile back over
+            const isValidMove =
+                this.#solitaire.drawPile.length === 0 ? this.#solitaire.shuffleDiscardPile() : this.#solitaire.drawCard()
+            if (isValidMove) {
+                this.#handleMoveCompleted()
             }
-
-            if (this.#solitaire.drawPile.length === 0) {
-                this.#solitaire.shuffleDiscardPile()
-                this.#discardPileCards.forEach((card) => card.setVisible(false))
-                this.#showCardsInDrawPile()
-                this.#incrementMoveCounter()
-                return
-            }
-
-            this.#solitaire.drawCard()
-            this.#showCardsInDrawPile()
-            this.#discardPileCards[0].setFrame(this.#discardPileCards[1].frame).setVisible(this.#discardPileCards[1].visible)
-            const card = this.#solitaire.discardPile[this.#solitaire.discardPile.length - 1]
-            this.#discardPileCards[1].setFrame(this.#getCardFrame(card)).setVisible(true)
-            this.#incrementMoveCounter()
         })
 
         if (DEBUG) {
@@ -181,18 +194,57 @@ export class Game extends Phaser.Scene {
     #createTableauPiles(): void {
         this.#tableauContainers = []
 
-        this.#solitaire.tableauPiles.forEach((pile, pileIndex) => {
+        for (let pileIndex = 0; pileIndex < 7; pileIndex += 1) {
             const x = TABLEAU_PILE_X_POSITION + pileIndex * TABLEAU_PILE_SPACER_X
-            const tableauContainer = this.add.container(x, TABLEAU_PILE_Y_POSITION, [])
-            this.#tableauContainers.push(tableauContainer)
+            this.#tableauContainers.push(this.add.container(x, TABLEAU_PILE_Y_POSITION, []))
+        }
+    }
+
+    /**
+     * Updates every card on the table to match the game state. Called after each move and each undo, so the table never
+     * has to be patched up move by move.
+     */
+    #renderBoard(): void {
+        const numberOfDrawPileCardsToShow = Math.min(this.#solitaire.drawPile.length, this.#drawPileCards.length)
+        this.#drawPileCards.forEach((cardGameObject, cardIndex) =>
+            cardGameObject.setVisible(cardIndex < numberOfDrawPileCardsToShow),
+        )
+
+        // the two discard pile game objects show the top two cards of the discard pile
+        const discardPile = this.#solitaire.discardPile
+        this.#discardPileCards.forEach((cardGameObject, cardIndex) => {
+            const card = discardPile[discardPile.length - this.#discardPileCards.length + cardIndex]
+            cardGameObject.setVisible(card !== undefined)
+            if (card !== undefined) {
+                cardGameObject.setFrame(this.#getCardFrame(card))
+            }
+        })
+
+        this.#solitaire.foundationPiles.forEach((pile, pileIndex) => {
+            this.#foundationPileCards[pileIndex].setVisible(pile.value !== 0)
+            if (pile.value !== 0) {
+                this.#foundationPileCards[pileIndex].setFrame(this.#getCardFrame(pile))
+            }
+        })
+
+        this.#solitaire.tableauPiles.forEach((pile, pileIndex) => {
+            // add or remove card game objects so the container has one for each card in the pile
+            const tableauContainer = this.#tableauContainers[pileIndex]
+            while (tableauContainer.length < pile.length) {
+                tableauContainer.add(this.#createCard(0, 0, false))
+            }
+            while (tableauContainer.length > pile.length) {
+                tableauContainer.removeAt(tableauContainer.length - 1, true)
+            }
+
             pile.forEach((card, cardIndex) => {
-                const cardGameObject = this.#createCard(0, 0, false, cardIndex, pileIndex)
-                tableauContainer.add(cardGameObject)
-                if (card.isFaceUp) {
-                    cardGameObject.setFrame(this.#getCardFrame(card))
-                    this.input.setDraggable(cardGameObject)
-                }
+                const cardGameObject = tableauContainer.getAt<Phaser.GameObjects.Image>(cardIndex)
+                cardGameObject.setFrame(card.isFaceUp ? this.#getCardFrame(card) : CARD_BACK_FRAME)
+                this.input.setDraggable(cardGameObject, card.isFaceUp)
             })
+
+            // a dragged card that was moved away gets destroyed without a drag end event, so reset the drag depth here
+            tableauContainer.setDepth(0)
             this.#layoutTableauPile(pileIndex)
         })
     }
@@ -227,24 +279,13 @@ export class Game extends Phaser.Scene {
         this.add.rectangle(x, y, CARD_WIDTH * SCALE, CARD_HEIGHT * SCALE).setOrigin(0).setStrokeStyle(2, 0x0E0D0D, 0.5)
     }
 
-    #createCard(
-        x: number,
-        y: number,
-        draggable: boolean,
-        cardIndex?: number,
-        pileIndex?: number,
-    ): Phaser.GameObjects.Image {
+    #createCard(x: number, y: number, draggable: boolean): Phaser.GameObjects.Image {
         return this.add
             .image(x, y, ASSET_KEYS.CARDS, CARD_BACK_FRAME)
             .setOrigin(0)
             .setScale(SCALE)
             .setInteractive({ draggable: draggable })
-            .setData({
-                x,
-                y,
-                cardIndex,
-                pileIndex,
-            })
+            .setData({ x, y })
     }
 
     #createDragEvents(): void {
@@ -363,13 +404,27 @@ export class Game extends Phaser.Scene {
         this.input.on(
             Phaser.Input.Events.DROP,
             (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.Image, dropZone: Phaser.GameObjects.Zone) => {
-                const zoneType = dropZone.getData('zoneType') as ZoneType
-                if (zoneType === ZONE_TYPE.FOUNDATION) {
-                    this.#handleMoveCardToFoundation(gameObject)
-                    return
+                // cards dragged from the discard pile don't have a tableau pile index
+                const tableauPileIndex = gameObject.getData('pileIndex') as number | undefined
+                const cardIndex = gameObject.getData('cardIndex') as number
+
+                let isValidMove: boolean
+                if ((dropZone.getData('zoneType') as ZoneType) === ZONE_TYPE.FOUNDATION) {
+                    isValidMove =
+                        tableauPileIndex === undefined
+                            ? this.#solitaire.playDiscardPileCardToFoundation()
+                            : this.#solitaire.moveTableauCardToFoundation(tableauPileIndex, cardIndex)
+                } else {
+                    const targetTableauPileIndex = dropZone.getData('tableauIndex') as number
+                    isValidMove =
+                        tableauPileIndex === undefined
+                            ? this.#solitaire.playDiscardPileCardToTableau(targetTableauPileIndex)
+                            : this.#solitaire.moveTableauCardsToAnotherTableau(tableauPileIndex, cardIndex, targetTableauPileIndex)
                 }
-                const tableauIndex = dropZone.getData('tableauIndex') as number
-                this.#handleMoveCardTableau(gameObject, tableauIndex)
+
+                if (isValidMove) {
+                    this.#handleMoveCompleted()
+                }
             },
         )
     }
@@ -383,145 +438,24 @@ export class Game extends Phaser.Scene {
         }
     }
 
-    #handleMoveCardToFoundation(gameObject: Phaser.GameObjects.Image): void {
-        let isValidMove = false
-        let isCardFromDiscardPile = false
+    #handleMoveCompleted(): void {
+        this.#playCardDrop()
+        this.#renderBoard()
+        this.#updateHud()
 
-        const tableauPileIndex = gameObject.getData('pileIndex') as number | undefined
-        if (tableauPileIndex === undefined) {
-            isValidMove = this.#solitaire.playDiscardPileCardToFoundation()
-            isCardFromDiscardPile = true
-        } else {
-            isValidMove = this.#solitaire.moveTableauCardToFoundation(
-                tableauPileIndex,
-                gameObject.getData('cardIndex') as number,
-            )
-        }
-
-        if (!isValidMove) {
-            return
-        } else {
-            this.#playCardDrop()
-            this.#incrementMoveCounter()
-            this.score += 10
-        }
-
-        if (isCardFromDiscardPile) {
-            this.#updateCardGameObjectsInDiscardPile()
-        } else {
-            gameObject.destroy()
-            this.#handleRevealingNewTableauCards(tableauPileIndex as number)
-        }
-        this.#updateFoundationPiles()
-    }
-
-    #handleMoveCardTableau(gameObject: Phaser.GameObjects.Image, targetTableauPileIndex: number): void {
-        let isValidMove = false
-        let isCardFromDiscardPile = false
-
-        const originalTargetPileSize = this.#tableauContainers[targetTableauPileIndex].length
-
-        const tableauPileIndex = gameObject.getData('pileIndex') as number | undefined
-        const tableauCardIndex = gameObject.getData('cardIndex') as number
-        if (tableauPileIndex === undefined) {
-            isValidMove = this.#solitaire.playDiscardPileCardToTableau(targetTableauPileIndex)
-            isCardFromDiscardPile = true
-        } else {
-            isValidMove = this.#solitaire.moveTableauCardsToAnotherTableau(
-                tableauPileIndex,
-                tableauCardIndex,
-                targetTableauPileIndex,
-            )
-        }
-        if (!isValidMove) {
-            return
-        } else {
-            this.#playCardDrop()
-            this.#incrementMoveCounter()
-            if (isCardFromDiscardPile) {
-                this.score += 5;
-            }
-        }
-
-        if (isCardFromDiscardPile) {
-            const card = this.#createCard(0, 0, true, originalTargetPileSize, targetTableauPileIndex)
-            card.setFrame(gameObject.frame)
-            this.#tableauContainers[targetTableauPileIndex].add(card)
-            this.#layoutTableauPile(targetTableauPileIndex)
-            this.#updateCardGameObjectsInDiscardPile()
+        if (!this.#solitaire.wonGame) {
             return
         }
 
-        const numberOfCardsToMove = this.#getNumberOfCardsToMoveAsPartOfStack(tableauPileIndex as number, tableauCardIndex)
-        for (let i = 0; i <= numberOfCardsToMove; i += 1) {
-            const cardGameObject =
-                this.#tableauContainers[tableauPileIndex as number].getAt<Phaser.GameObjects.Image>(tableauCardIndex)
-            this.#tableauContainers[tableauPileIndex as number].removeAt(tableauCardIndex)
-            this.#tableauContainers[targetTableauPileIndex].add(cardGameObject)
-        }
-        this.#layoutTableauPile(targetTableauPileIndex)
+        this.timerRunning = false;
+        this.timerEvent.remove(false);
 
-        this.#tableauContainers[tableauPileIndex as number].setDepth(0)
-
-        this.#handleRevealingNewTableauCards(tableauPileIndex as number)
-    }
-
-    #updateCardGameObjectsInDiscardPile(): void {
-        this.#discardPileCards[1].setFrame(this.#discardPileCards[0].frame).setVisible(this.#discardPileCards[0].visible)
-        const discardPileCard = this.#solitaire.discardPile[this.#solitaire.discardPile.length - 2]
-        if (discardPileCard === undefined) {
-            this.#discardPileCards[0].setVisible(false)
-        } else {
-            this.#discardPileCards[0].setFrame(this.#getCardFrame(discardPileCard)).setVisible(true)
-        }
-    }
-
-    #handleRevealingNewTableauCards(tableauPileIndex: number): void {
-        this.#tableauContainers[tableauPileIndex].setDepth(0)
-        const flipTableauCard = this.#solitaire.flipTopTableauCard(tableauPileIndex)
-        if (flipTableauCard) {
-            this.score += 5;
-            const tableauPile = this.#solitaire.tableauPiles[tableauPileIndex]
-            const tableauCard = tableauPile[tableauPile.length - 1]
-            const cardGameObject = this.#tableauContainers[tableauPileIndex].getAt<Phaser.GameObjects.Image>(
-                tableauPile.length - 1,
-            )
-            cardGameObject.setFrame(this.#getCardFrame(tableauCard))
-            this.input.setDraggable(cardGameObject)
-        }
-        this.#layoutTableauPile(tableauPileIndex)
-    }
-
-    #updateFoundationPiles(): void {
-        this.#solitaire.foundationPiles.forEach((pile: FoundationPile, pileIndex: number) => {
-            if (pile.value === 0) {
+        this.cameras.main.fadeOut(1000, 0, 0, 0, (camera: Phaser.Cameras.Scene2D.Camera, progress: number) => {
+            if (progress !== 1) {
                 return
             }
-
-            this.#foundationPileCards[pileIndex].setVisible(true).setFrame(this.#getCardFrame(pile))
+            this.scene.start(SCENE_KEYS.WIN, { moves: this.#solitaire.numberOfMoves, time: formatTime(this.elapsedTime), score: this.#solitaire.score })
         })
-        if (this.#solitaire.wonGame) {
-            this.timerRunning = false;
-            this.timerEvent.remove(false);
-
-            this.cameras.main.fadeOut(1000, 0, 0, 0, (camera: Phaser.Cameras.Scene2D.Camera, progress: number) => {
-                if (progress !== 1) {
-                    return
-                }
-                const deduction = Math.floor((this.elapsedTime / 10) * 2)
-                const finalScore = this.score - deduction
-                this.scene.start(SCENE_KEYS.WIN, { moves: this.numberOfMoves, time: formatTime(this.elapsedTime), score: finalScore })
-            })
-        }
-    }
-
-    #showCardsInDrawPile(): void {
-        const numberOfCardsToShow = Math.min(this.#solitaire.drawPile.length, 3)
-        this.#drawPileCards.forEach((card, cardIndex) => {
-            const showCard = cardIndex < numberOfCardsToShow
-            card.setVisible(showCard)
-        })
-        this.#playCardDrop()
     }
 
     #getCardFrame(data: Card | FoundationPile): number {

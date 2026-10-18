@@ -1,8 +1,42 @@
 import { Card } from './card';
-import { CARD_SUIT } from './common';
+import { CARD_SUIT, CardSuit, CardValue } from './common';
 import { Deck } from './deck';
 import { FoundationPile } from './foundationPile';
 import { exhaustiveGuard } from './utils';
+
+// points awarded for each kind of move, and what undoing a move and every 10 seconds of play cost
+export const SCORE = {
+    DISCARD_TO_FOUNDATION: 10,
+    TABLEAU_TO_FOUNDATION: 10,
+    DISCARD_TO_TABLEAU: 5,
+    REVEAL_TABLEAU_CARD: 5,
+    UNDO: -15,
+    TIME_PENALTY: -2,
+} as const;
+
+type CardState = {
+    suit: CardSuit;
+    value: CardValue;
+    isFaceUp: boolean;
+};
+
+// a saved copy of the game, taken before each move so the move can be undone
+type SolitaireState = {
+    drawPile: CardState[];
+    discardPile: CardState[];
+    tableauPiles: CardState[][];
+    foundationValues: (CardValue | 0)[];
+    // the points the move earned, so undoing it can take them back
+    points: number;
+};
+
+function toCardState(card: Card): CardState {
+    return { suit: card.suit, value: card.value, isFaceUp: card.isFaceUp };
+}
+
+function toCard(cardState: CardState): Card {
+    return new Card(cardState.suit, cardState.value, cardState.isFaceUp);
+}
 
 export class Solitaire {
     #deck: Deck;
@@ -11,6 +45,9 @@ export class Solitaire {
     #foundationPileHeart: FoundationPile;
     #foundationPileDiamond: FoundationPile;
     #tableauPiles: Card[][];
+    #score: number;
+    #numberOfMoves: number;
+    #history: SolitaireState[];
 
     constructor() {
         this.#deck = new Deck();
@@ -19,6 +56,9 @@ export class Solitaire {
         this.#foundationPileHeart = new FoundationPile(CARD_SUIT.HEART);
         this.#foundationPileDiamond = new FoundationPile(CARD_SUIT.DIAMOND);
         this.#tableauPiles = [[], [], [], [], [], [], []];
+        this.#score = 0;
+        this.#numberOfMoves = 0;
+        this.#history = [];
     }
 
     get drawPile(): Card[] {
@@ -40,6 +80,18 @@ export class Solitaire {
             this.#foundationPileHeart,
             this.#foundationPileDiamond,
         ];
+    }
+
+    get score(): number {
+        return this.#score;
+    }
+
+    get numberOfMoves(): number {
+        return this.#numberOfMoves;
+    }
+
+    get canUndo(): boolean {
+        return this.#history.length > 0;
     }
 
     get wonGame(): boolean {
@@ -74,6 +126,9 @@ export class Solitaire {
         this.#foundationPileDiamond.reset();
         this.#foundationPileHeart.reset();
         this.#foundationPileSpade.reset();
+        this.#score = 0;
+        this.#numberOfMoves = 0;
+        this.#history = [];
 
         for (let i = 0; i < 7; i += 1) {
             for (let j = i; j < 7; j += 1) {
@@ -87,20 +142,24 @@ export class Solitaire {
     }
 
     public drawCard(): boolean {
-        const card = this.#deck.draw();
-        if (card === undefined) {
+        if (this.#deck.drawPile.length === 0) {
             return false;
         }
+
+        this.#startMove(0);
+        const card = this.#deck.draw() as Card;
         card.flip();
         this.#deck.discardPile.push(card);
         return true;
     }
 
     public shuffleDiscardPile(): boolean {
-        if (this.#deck.drawPile.length !== 0) {
+        // the discard pile can only be turned back over once the draw pile is empty
+        if (this.#deck.drawPile.length !== 0 || this.#deck.discardPile.length === 0) {
             return false;
         }
 
+        this.#startMove(0);
         this.#deck.shuffleInDiscardPile();
         return true;
     }
@@ -118,6 +177,7 @@ export class Solitaire {
         }
 
         // play card to the foundation pile and remove from the discard pile
+        this.#startMove(SCORE.DISCARD_TO_FOUNDATION);
         this.#addCardToFoundation(card);
         this.#deck.discardPile.pop();
 
@@ -142,28 +202,10 @@ export class Solitaire {
         }
 
         // play card to the tableau pile and remove from the discard pile
+        this.#startMove(SCORE.DISCARD_TO_TABLEAU);
         this.#tableauPiles[targetTableauIndex].push(card);
         this.#deck.discardPile.pop();
 
-        return true;
-    }
-
-    public flipTopTableauCard(tableauIndex: number): boolean {
-        // get the last card in the tableau pile that was provided (last element in the pile array)
-        const tableauPile = this.#tableauPiles[tableauIndex];
-        if (tableauPile === undefined) {
-            return false;
-        }
-        const card = tableauPile[tableauPile.length - 1];
-        if (card === undefined) {
-            return false;
-        }
-
-        if (card.isFaceUp) {
-            return false;
-        }
-
-        card.flip();
         return true;
     }
 
@@ -195,8 +237,10 @@ export class Solitaire {
         }
 
         // move the cards to the target tableau pile and remove from the initial tableau pile
+        this.#startMove(0);
         const cardsToMove = initialTableauPile.splice(cardIndex);
         cardsToMove.forEach((card) => targetTableauPile.push(card));
+        this.#revealTopTableauCard(initialTableauIndex);
 
         return true;
     }
@@ -222,10 +266,72 @@ export class Solitaire {
         }
 
         // play card to the foundation pile and remove from the tableau pile
+        this.#startMove(SCORE.TABLEAU_TO_FOUNDATION);
         this.#addCardToFoundation(card);
         tableauPile.pop();
+        this.#revealTopTableauCard(tableauIndex);
 
         return true;
+    }
+
+    /**
+     * Puts the game back the way it was before the last move. Undoing takes back the points that move earned plus the
+     * undo cost, and counts as a move. Time penalties taken since the move are not refunded.
+     */
+    public undo(): boolean {
+        const previousState = this.#history.pop();
+        if (previousState === undefined) {
+            return false;
+        }
+
+        this.#deck.restore(previousState.drawPile.map(toCard), previousState.discardPile.map(toCard));
+        this.#tableauPiles = previousState.tableauPiles.map((pile) => pile.map(toCard));
+        this.foundationPiles.forEach((pile, pileIndex) => pile.restore(previousState.foundationValues[pileIndex]));
+        this.#score = Math.max(0, this.#score - previousState.points + SCORE.UNDO);
+        this.#numberOfMoves += 1;
+
+        return true;
+    }
+
+    /**
+     * Takes points off for time played. Called every 10 seconds while the game is running.
+     */
+    public applyTimePenalty(): void {
+        this.#score = Math.max(0, this.#score + SCORE.TIME_PENALTY);
+    }
+
+    /**
+     * Saves the game so the move about to be made can be undone, then counts the move and awards its points. Called once a
+     * move is known to be valid, before any cards are moved.
+     */
+    #startMove(points: number): void {
+        this.#history.push({
+            drawPile: this.#deck.drawPile.map(toCardState),
+            discardPile: this.#deck.discardPile.map(toCardState),
+            tableauPiles: this.#tableauPiles.map((pile) => pile.map(toCardState)),
+            foundationValues: this.foundationPiles.map((pile) => pile.value),
+            points: 0,
+        });
+        this.#numberOfMoves += 1;
+        this.#awardPoints(points);
+    }
+
+    // adds points for the move being made, and records them with the move so an undo can take them back
+    #awardPoints(points: number): void {
+        this.#score += points;
+        this.#history[this.#history.length - 1].points += points;
+    }
+
+    // turns over the last card in a tableau pile once the cards on top of it have been moved away
+    #revealTopTableauCard(tableauIndex: number): void {
+        const tableauPile = this.#tableauPiles[tableauIndex];
+        const card = tableauPile[tableauPile.length - 1];
+        if (card === undefined || card.isFaceUp) {
+            return;
+        }
+
+        card.flip();
+        this.#awardPoints(SCORE.REVEAL_TABLEAU_CARD);
     }
 
     #addCardToFoundation(card: Card): void {

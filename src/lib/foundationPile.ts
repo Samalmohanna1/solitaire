@@ -28,4 +28,11 @@ export class FoundationPile {
     public reset(): void {
         this.#currentValue = 0;
     }
+
+    /**
+     * Sets the pile back to a previously saved value, used when undoing a move.
+     */
+    public restore(value: CardValue | 0): void {
+        this.#currentValue = value;
+    }
 }
