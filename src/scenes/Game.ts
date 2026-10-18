@@ -27,6 +27,12 @@ const SUIT_FRAMES = {
     CLUB: 0,
 }
 const textStyle = { font: '34px Raleway', fontStyle: 'bold', color: '#FFFEFF' }
+const autoCompleteButtonStyle = { ...textStyle, color: '#0d0d0d', backgroundColor: '#FFFFEF', padding: { x: 30, y: 20 } }
+const CARD_FLY_DURATION = 250
+const AUTO_COMPLETE_DELAY = 120
+// two clicks on the same card within this many milliseconds, without dragging it, play it to its foundation
+const DOUBLE_CLICK_TIME = 350
+const CLICK_MAX_DISTANCE = 20
 
 function formatTime(seconds: number): string {
     const minutes = Math.floor(seconds / 60);
@@ -49,9 +55,13 @@ export class Game extends Phaser.Scene {
     #discardPileCards!: Phaser.GameObjects.Image[]
     #foundationPileCards!: Phaser.GameObjects.Image[]
     #tableauContainers!: Phaser.GameObjects.Container[]
+    // how many cards are still flying to each foundation pile, so the pile doesn't show them before they land
+    #cardsFlyingToFoundation!: number[]
+    #isAutoCompleting!: boolean
     moveCounterText: Phaser.GameObjects.Text
     scoreText!: Phaser.GameObjects.Text
     undoButton!: Phaser.GameObjects.Text
+    autoCompleteButton!: Phaser.GameObjects.Text
     timerEvent!: Phaser.Time.TimerEvent;
     timerText!: Phaser.GameObjects.Text;
     timerRunning: boolean = false;
@@ -66,6 +76,8 @@ export class Game extends Phaser.Scene {
         this.cameras.main.fadeIn(1000)
         this.#solitaire = new Solitaire()
         this.#solitaire.newGame()
+        this.#cardsFlyingToFoundation = [0, 0, 0, 0]
+        this.#isAutoCompleting = false
 
         this.#createDrawPile()
         this.#createDiscardPile()
@@ -101,6 +113,19 @@ export class Game extends Phaser.Scene {
             }
         })
 
+        // the draw and discard piles are always empty when auto-complete is possible, so the button sits over them
+        this.autoCompleteButton = this.add
+            .text(
+                (DRAW_PILE_X_POSITION + DISCARD_PILE_X_POSITION + CARD_WIDTH * SCALE) / 2,
+                DRAW_PILE_Y_POSITION + (CARD_HEIGHT * SCALE) / 2,
+                'Auto-complete',
+                autoCompleteButtonStyle,
+            )
+            .setOrigin(0.5)
+            .setDepth(10)
+            .setInteractive({ useHandCursor: true })
+        this.autoCompleteButton.on('pointerdown', () => this.#startAutoComplete())
+
         this.timerText = this.add.text(this.scale.width / 2, TABLEAU_PILE_SPACER_Y + 996, '00:00', { font: '54px Raleway', fontStyle: 'bold', color: '#FFFEFF' }).setOrigin(.5)
 
         this.timerEvent = this.time.addEvent({
@@ -131,15 +156,19 @@ export class Game extends Phaser.Scene {
         this.moveCounterText.setText('Moves: ' + this.#solitaire.numberOfMoves)
         this.scoreText.setText('Score: ' + this.#solitaire.score)
         this.undoButton.setAlpha(this.#solitaire.canUndo ? 1 : 0.4)
+        this.autoCompleteButton.setVisible(this.#solitaire.canAutoComplete && !this.#isAutoCompleting)
     }
 
     #undo(): void {
         // the board is redrawn after an undo, which would pull cards out from under a drag in progress
         const isDragging = this.input.manager.pointers.some((pointer) => this.input.getDragState(pointer) !== 0)
-        if (isDragging || this.#solitaire.wonGame || !this.#solitaire.undo()) {
+        if (isDragging || this.#isAutoCompleting || this.#solitaire.wonGame || !this.#solitaire.canUndo) {
             return
         }
 
+        // land any cards still flying to a foundation first, so the foundation piles end up showing the right cards
+        this.tweens.getTweens().forEach((tween) => tween.complete())
+        this.#solitaire.undo()
         this.#playCardDrop()
         this.#renderBoard()
         this.#updateHud()
@@ -220,12 +249,7 @@ export class Game extends Phaser.Scene {
             }
         })
 
-        this.#solitaire.foundationPiles.forEach((pile, pileIndex) => {
-            this.#foundationPileCards[pileIndex].setVisible(pile.value !== 0)
-            if (pile.value !== 0) {
-                this.#foundationPileCards[pileIndex].setFrame(this.#getCardFrame(pile))
-            }
-        })
+        this.#renderFoundationPiles()
 
         this.#solitaire.tableauPiles.forEach((pile, pileIndex) => {
             // add or remove card game objects so the container has one for each card in the pile
@@ -246,6 +270,16 @@ export class Game extends Phaser.Scene {
             // a dragged card that was moved away gets destroyed without a drag end event, so reset the drag depth here
             tableauContainer.setDepth(0)
             this.#layoutTableauPile(pileIndex)
+        })
+    }
+
+    #renderFoundationPiles(): void {
+        this.#solitaire.foundationPiles.forEach((pile, pileIndex) => {
+            const value = pile.value - this.#cardsFlyingToFoundation[pileIndex]
+            this.#foundationPileCards[pileIndex].setVisible(value > 0)
+            if (value > 0) {
+                this.#foundationPileCards[pileIndex].setFrame(SUIT_FRAMES[pile.suit] + value - 1)
+            }
         })
     }
 
@@ -292,6 +326,7 @@ export class Game extends Phaser.Scene {
         this.#createDragStartEventListener()
         this.#createOnDragEventListener()
         this.#createDragEndEventListener()
+        this.#createDoubleClickEventListener()
         this.#createDropEventListener()
     }
 
@@ -359,6 +394,29 @@ export class Game extends Phaser.Scene {
                             cardToMove.setPosition(cardToMove.getData('x') as number, cardToMove.getData('y') as number)
                         }
                     }
+                }
+            },
+        )
+    }
+
+    #createDoubleClickEventListener(): void {
+        let lastClickedCard: Phaser.GameObjects.Image | undefined
+        let lastClickTime = 0
+
+        // pressing a face up card always starts a drag, so a click is a drag that ends where it started
+        this.input.on(
+            Phaser.Input.Events.DRAG_END,
+            (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.Image) => {
+                if (pointer.getDistance() > CLICK_MAX_DISTANCE) {
+                    lastClickedCard = undefined
+                    return
+                }
+
+                const isDoubleClick = gameObject === lastClickedCard && pointer.upTime - lastClickTime < DOUBLE_CLICK_TIME
+                lastClickedCard = isDoubleClick ? undefined : gameObject
+                lastClickTime = pointer.upTime
+                if (isDoubleClick) {
+                    this.#sendCardToFoundation(gameObject)
                 }
             },
         )
@@ -456,6 +514,76 @@ export class Game extends Phaser.Scene {
             }
             this.scene.start(SCENE_KEYS.WIN, { moves: this.#solitaire.numberOfMoves, time: formatTime(this.elapsedTime), score: this.#solitaire.score })
         })
+    }
+
+    /**
+     * Plays a discard pile or tableau card to its foundation, if that's a valid move, and animates it flying there. Used
+     * by double clicks and auto-complete.
+     */
+    #sendCardToFoundation(cardGameObject: Phaser.GameObjects.Image): boolean {
+        // cards in the discard pile don't have a tableau pile index
+        const tableauPileIndex = cardGameObject.getData('pileIndex') as number | undefined
+        const sourcePile =
+            tableauPileIndex === undefined ? this.#solitaire.discardPile : this.#solitaire.tableauPiles[tableauPileIndex]
+        const card = sourcePile[sourcePile.length - 1]
+        const isValidMove =
+            tableauPileIndex === undefined
+                ? this.#solitaire.playDiscardPileCardToFoundation()
+                : this.#solitaire.moveTableauCardToFoundation(tableauPileIndex, cardGameObject.getData('cardIndex') as number)
+        if (!isValidMove) {
+            return false
+        }
+
+        // read the card's position before the board is redrawn, since tableau cards are positioned inside their container
+        const startX = cardGameObject.x + (cardGameObject.parentContainer?.x ?? 0)
+        const startY = cardGameObject.y + (cardGameObject.parentContainer?.y ?? 0)
+        const foundationIndex = this.#solitaire.foundationPiles.findIndex((pile) => pile.suit === card.suit)
+        this.#cardsFlyingToFoundation[foundationIndex] += 1
+        this.#handleMoveCompleted()
+
+        const foundationCard = this.#foundationPileCards[foundationIndex]
+        const flyingCard = this.add
+            .image(startX, startY, ASSET_KEYS.CARDS, this.#getCardFrame(card))
+            .setOrigin(0)
+            .setScale(SCALE)
+            .setDepth(100)
+        this.tweens.add({
+            targets: flyingCard,
+            x: foundationCard.x,
+            y: foundationCard.y,
+            duration: CARD_FLY_DURATION,
+            ease: 'Quad.easeOut',
+            onComplete: () => {
+                flyingCard.destroy()
+                this.#cardsFlyingToFoundation[foundationIndex] -= 1
+                this.#renderFoundationPiles()
+            },
+        })
+        return true
+    }
+
+    #startAutoComplete(): void {
+        if (this.#isAutoCompleting || !this.#solitaire.canAutoComplete) {
+            return
+        }
+
+        this.#isAutoCompleting = true
+        this.#updateHud()
+        this.#autoCompleteNextCard()
+    }
+
+    // plays one card to a foundation, then waits a moment before playing the next, until the game is won
+    #autoCompleteNextCard(): void {
+        const pileIndex = this.#solitaire.findNextAutoCompletePile()
+        const tableauContainer = pileIndex === undefined ? undefined : this.#tableauContainers[pileIndex]
+        const lastCard = tableauContainer?.getAt<Phaser.GameObjects.Image>(tableauContainer.length - 1)
+        if (lastCard === undefined || !this.#sendCardToFoundation(lastCard)) {
+            this.#isAutoCompleting = false
+            this.#updateHud()
+            return
+        }
+
+        this.time.delayedCall(AUTO_COMPLETE_DELAY, () => this.#autoCompleteNextCard())
     }
 
     #getCardFrame(data: Card | FoundationPile): number {
