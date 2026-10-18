@@ -245,3 +245,63 @@ describe('undo', () => {
         expect(game.numberOfMoves).toBe(0);
     });
 });
+
+describe('auto-complete', () => {
+    // every card except the jack, queen and king of spades and the queen and king of hearts is on the foundations
+    function setUpNearlyWonGame(): Solitaire {
+        const game = setUpGame({
+            tableau: [
+                [card(13, 'SPADE'), card(12, 'HEART')],
+                [card(13, 'HEART'), card(12, 'SPADE')],
+                [card(11, 'SPADE')],
+            ],
+        });
+        const [spades, clubs, hearts, diamonds] = game.foundationPiles;
+        spades.restore(10);
+        clubs.restore(13);
+        hearts.restore(11);
+        diamonds.restore(13);
+        return game;
+    }
+
+    it('is not offered at the start of a game', () => {
+        const game = new Solitaire();
+        game.newGame();
+
+        expect(game.canAutoComplete).toBe(false);
+    });
+
+    it('is offered once the draw and discard piles are empty and every tableau card is face up', () => {
+        expect(setUpNearlyWonGame().canAutoComplete).toBe(true);
+    });
+
+    it('is not offered while a tableau card is face down or there are cards left to draw', () => {
+        const faceDownCard = setUpGame({ tableau: [[card(5, 'HEART', false), card(4, 'SPADE')]] });
+        const cardsToDraw = setUpGame({ tableau: [[card(4, 'SPADE')]], draw: [card(5, 'HEART', false)] });
+        const cardsInDiscardPile = setUpGame({ tableau: [[card(4, 'SPADE')]], discard: [card(5, 'HEART')] });
+
+        expect([faceDownCard, cardsToDraw, cardsInDiscardPile].map((game) => game.canAutoComplete)).toEqual([false, false, false]);
+    });
+
+    it('plays the lowest card first, then every remaining card until the game is won', () => {
+        const game = setUpNearlyWonGame();
+        expect(game.findNextAutoCompletePile()).toBe(2);
+
+        let nextPileIndex = game.findNextAutoCompletePile();
+        while (nextPileIndex !== undefined) {
+            expect(game.moveTableauCardToFoundation(nextPileIndex, game.tableauPiles[nextPileIndex].length - 1)).toBe(true);
+            nextPileIndex = game.findNextAutoCompletePile();
+        }
+
+        expect(game.wonGame).toBe(true);
+        expect(game.canAutoComplete).toBe(false);
+        expect(game.numberOfMoves).toBe(5);
+        expect(game.score).toBe(5 * SCORE.TABLEAU_TO_FOUNDATION);
+    });
+
+    it('finds nothing to play when no tableau card can go to a foundation', () => {
+        const game = setUpGame({ tableau: [[card(5, 'HEART')]] });
+
+        expect(game.findNextAutoCompletePile()).toBeUndefined();
+    });
+});

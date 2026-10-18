@@ -94,6 +94,19 @@ export class Solitaire {
         return this.#history.length > 0;
     }
 
+    /**
+     * Whether the rest of the game can be played automatically. Once the draw and discard piles are empty and every
+     * tableau card is face up, every remaining card can be played to the foundations.
+     */
+    get canAutoComplete(): boolean {
+        return (
+            !this.wonGame &&
+            this.#deck.drawPile.length === 0 &&
+            this.#deck.discardPile.length === 0 &&
+            this.#tableauPiles.every((pile) => pile.every((card) => card.isFaceUp))
+        );
+    }
+
     get wonGame(): boolean {
         return (
             this.#foundationPileClub.value === 13 &&
@@ -272,6 +285,23 @@ export class Solitaire {
         this.#revealTopTableauCard(tableauIndex);
 
         return true;
+    }
+
+    /**
+     * Finds the tableau pile to play to a foundation next when auto-completing: the one whose last card is the lowest
+     * card that can be played. Returns undefined when no tableau card can be played to a foundation.
+     */
+    public findNextAutoCompletePile(): number | undefined {
+        let nextPileIndex: number | undefined;
+        let lowestValue = Infinity;
+        this.#tableauPiles.forEach((pile, pileIndex) => {
+            const card = pile[pile.length - 1];
+            if (card !== undefined && card.value < lowestValue && this.#isValidMoveToAddCardToFoundation(card)) {
+                nextPileIndex = pileIndex;
+                lowestValue = card.value;
+            }
+        });
+        return nextPileIndex;
     }
 
     /**
