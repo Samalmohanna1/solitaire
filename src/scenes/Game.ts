@@ -1,6 +1,8 @@
 import * as Phaser from 'phaser'
-import { ASSET_KEYS, CARD_HEIGHT, CARD_WIDTH, SCENE_KEYS, createFullscreenButton } from './Commons'
+import { ASSET_KEYS, CARD_HEIGHT, CARD_WIDTH, SCENE_KEYS, createFullscreenButton, formatTime } from './Commons'
 import { Solitaire } from '../lib/solitaire'
+import { GameStats } from '../lib/stats'
+import type { WinData } from './Win'
 import { Card } from '../lib/card'
 import { FoundationPile } from '../lib/foundationPile'
 
@@ -27,20 +29,21 @@ const SUIT_FRAMES = {
     CLUB: 0,
 }
 const textStyle = { font: '34px Raleway', fontStyle: 'bold', color: '#FFFEFF' }
-const autoCompleteButtonStyle = { ...textStyle, color: '#0d0d0d', backgroundColor: '#FFFFEF', padding: { x: 30, y: 20 } }
+const labelStyle = { ...textStyle, color: '#0d0d0d', backgroundColor: '#FFFFEF', padding: { x: 30, y: 20 } }
 const CARD_FLY_DURATION = 250
+const CARD_FLIP_DURATION = 200
+const SLIDE_BACK_DURATION = 150
 const AUTO_COMPLETE_DELAY = 120
+// the win cascade moves its cards 60 times a second, launching a card every few steps
+const CASCADE_STEP_TIME = 1000 / 60
+const CASCADE_LAUNCH_INTERVAL = 4
+const CASCADE_GRAVITY = 0.7
+const CASCADE_BOUNCE = 0.75
+// on a slow device the cascade plays in slow motion, rather than falling further and further behind
+const CASCADE_MAX_STEPS_PER_FRAME = 4
 // two clicks on the same card within this many milliseconds, without dragging it, play it to its foundation
 const DOUBLE_CLICK_TIME = 350
 const CLICK_MAX_DISTANCE = 20
-
-function formatTime(seconds: number): string {
-    const minutes = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    const minutesStr = minutes.toString().padStart(2, '0');
-    const secondsStr = secs.toString().padStart(2, '0');
-    return `${minutesStr}:${secondsStr}`;
-}
 
 
 type ZoneType = keyof typeof ZONE_TYPE
@@ -51,6 +54,9 @@ const ZONE_TYPE = {
 
 export class Game extends Phaser.Scene {
     #solitaire!: Solitaire
+    #stats!: GameStats
+    // whether this game has been counted in the stats yet, which happens on its first move
+    #isGameRecorded!: boolean
     #drawPileCards!: Phaser.GameObjects.Image[]
     #discardPileCards!: Phaser.GameObjects.Image[]
     #foundationPileCards!: Phaser.GameObjects.Image[]
@@ -76,6 +82,8 @@ export class Game extends Phaser.Scene {
         this.cameras.main.fadeIn(1000)
         this.#solitaire = new Solitaire()
         this.#solitaire.newGame()
+        this.#stats = new GameStats()
+        this.#isGameRecorded = false
         this.#cardsFlyingToFoundation = [0, 0, 0, 0]
         this.#isAutoCompleting = false
 
@@ -119,7 +127,7 @@ export class Game extends Phaser.Scene {
                 (DRAW_PILE_X_POSITION + DISCARD_PILE_X_POSITION + CARD_WIDTH * SCALE) / 2,
                 DRAW_PILE_Y_POSITION + (CARD_HEIGHT * SCALE) / 2,
                 'Auto-complete',
-                autoCompleteButtonStyle,
+                labelStyle,
             )
             .setOrigin(0.5)
             .setDepth(10)
@@ -263,13 +271,49 @@ export class Game extends Phaser.Scene {
 
             pile.forEach((card, cardIndex) => {
                 const cardGameObject = tableauContainer.getAt<Phaser.GameObjects.Image>(cardIndex)
-                cardGameObject.setFrame(card.isFaceUp ? this.#getCardFrame(card) : CARD_BACK_FRAME)
+                // a card that was face down the last time the board was drawn has just been revealed
+                const isRevealed = cardGameObject.getData('isFaceUp') === false && card.isFaceUp
+                cardGameObject.setData('isFaceUp', card.isFaceUp)
                 this.input.setDraggable(cardGameObject, card.isFaceUp)
+
+                if (isRevealed) {
+                    this.#flipCard(cardGameObject, this.#getCardFrame(card))
+                } else if (!cardGameObject.getData('isFlipping')) {
+                    cardGameObject.setFrame(card.isFaceUp ? this.#getCardFrame(card) : CARD_BACK_FRAME)
+                }
             })
 
             // a dragged card that was moved away gets destroyed without a drag end event, so reset the drag depth here
             tableauContainer.setDepth(0)
             this.#layoutTableauPile(pileIndex)
+        })
+    }
+
+    // turns a card face up by squashing it flat and stretching it back out with its face showing
+    #flipCard(cardGameObject: Phaser.GameObjects.Image, faceFrame: number): void {
+        cardGameObject.setData('isFlipping', true)
+        this.tweens.add({
+            targets: cardGameObject,
+            scaleX: 0,
+            // move right while narrowing, so the card turns around its middle
+            x: (CARD_WIDTH * SCALE) / 2,
+            duration: CARD_FLIP_DURATION / 2,
+            ease: 'Sine.easeIn',
+            yoyo: true,
+            onYoyo: () => {
+                if (cardGameObject.active) {
+                    cardGameObject.setFrame(faceFrame)
+                }
+            },
+            onComplete: () => {
+                if (cardGameObject.active) {
+                    cardGameObject
+                        .setFrame(faceFrame)
+                        .setScale(SCALE)
+                        .setX(cardGameObject.getData('x') as number)
+                        .setData('isFlipping', false)
+                }
+            },
         })
     }
 
@@ -334,13 +378,13 @@ export class Game extends Phaser.Scene {
         this.input.on(
             Phaser.Input.Events.DRAG_START,
             (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.Image) => {
-                gameObject.setData({ x: gameObject.x, y: gameObject.y })
                 const tableauPileIndex = gameObject.getData('pileIndex') as number | undefined
-                if (tableauPileIndex !== undefined) {
-                    this.#tableauContainers[tableauPileIndex].setDepth(2)
-                } else {
-                    gameObject.setDepth(2)
-                }
+                const tableauContainer = tableauPileIndex === undefined ? undefined : this.#tableauContainers[tableauPileIndex]
+
+                // finish any slide or flip still running in the pile, so it doesn't fight the drag
+                this.tweens.getTweensOf(tableauContainer?.list ?? [gameObject]).forEach((tween) => tween.complete())
+                const raisedObject = tableauContainer ?? gameObject
+                raisedObject.setDepth(2)
                 gameObject.setAlpha(0.8)
             },
         )
@@ -350,21 +394,12 @@ export class Game extends Phaser.Scene {
         this.input.on(
             Phaser.Input.Events.DRAG,
             (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.Image, dragX: number, dragY: number) => {
-                gameObject.setPosition(dragX, dragY)
                 gameObject.setDepth(50)
-
-                const tableauPileIndex = gameObject.getData('pileIndex') as number | undefined
-                const cardIndex = gameObject.getData('cardIndex') as number
-                if (tableauPileIndex !== undefined) {
-                    const numberOfCardsToMove = this.#getNumberOfCardsToMoveAsPartOfStack(tableauPileIndex, cardIndex)
-                    for (let i = 1; i <= numberOfCardsToMove; i += 1) {
-                        const cardToMove = this.#tableauContainers[tableauPileIndex].getAt<Phaser.GameObjects.Image>(
-                            cardIndex + i,
-                        )
-                        const offsetY = (cardToMove.getData('y') as number) - (gameObject.getData('y') as number)
-                        cardToMove.setPosition(dragX, dragY + offsetY)
-                    }
-                }
+                // the cards on top of a dragged tableau card move with it, keeping their spacing
+                this.#getCardsMovingWith(gameObject).forEach((card) => {
+                    const offsetY = (card.getData('y') as number) - (gameObject.getData('y') as number)
+                    card.setPosition(dragX, dragY + offsetY)
+                })
             },
         )
     }
@@ -373,28 +408,32 @@ export class Game extends Phaser.Scene {
         this.input.on(
             Phaser.Input.Events.DRAG_END,
             (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.Image) => {
+                if (!gameObject.active) {
+                    return
+                }
+                gameObject.setAlpha(1)
+
+                // slide the cards back to where they came from, keeping them above the other piles until they arrive.
+                // After a valid move the cards are already in place, so they don't move.
                 const tableauPileIndex = gameObject.getData('pileIndex') as number | undefined
-                if (tableauPileIndex !== undefined) {
-                    this.#tableauContainers[tableauPileIndex].setDepth(0)
-                } else {
-                    gameObject.setDepth(0)
-                }
-
-                if (gameObject.active) {
-                    gameObject.setPosition(gameObject.getData('x') as number, gameObject.getData('y') as number)
-                    gameObject.setAlpha(1)
-
-                    const cardIndex = gameObject.getData('cardIndex') as number
-                    if (tableauPileIndex !== undefined) {
-                        const numberOfCardsToMove = this.#getNumberOfCardsToMoveAsPartOfStack(tableauPileIndex, cardIndex)
-                        for (let i = 1; i <= numberOfCardsToMove; i += 1) {
-                            const cardToMove = this.#tableauContainers[tableauPileIndex].getAt<Phaser.GameObjects.Image>(
-                                cardIndex + i,
-                            )
-                            cardToMove.setPosition(cardToMove.getData('x') as number, cardToMove.getData('y') as number)
-                        }
-                    }
-                }
+                const raisedObject = tableauPileIndex === undefined ? gameObject : this.#tableauContainers[tableauPileIndex]
+                this.#getCardsMovingWith(gameObject).forEach((card, cardIndex) => {
+                    const x = card.getData('x') as number
+                    const y = card.getData('y') as number
+                    this.tweens.add({
+                        targets: card,
+                        x,
+                        y,
+                        duration: SLIDE_BACK_DURATION,
+                        ease: 'Quad.easeOut',
+                        onComplete: () => {
+                            card.setPosition(x, y)
+                            if (cardIndex === 0) {
+                                raisedObject.setDepth(0)
+                            }
+                        },
+                    })
+                })
             },
         )
     }
@@ -422,16 +461,15 @@ export class Game extends Phaser.Scene {
         )
     }
 
-    #getNumberOfCardsToMoveAsPartOfStack(tableauPileIndex: number, cardIndex: number): number {
-        if (tableauPileIndex !== undefined) {
-            const lastCardIndex = this.#tableauContainers[tableauPileIndex].length - 1
-            if (lastCardIndex === cardIndex) {
-                return 0
-            }
-
-            return lastCardIndex - cardIndex
+    // the dragged card, plus the cards on top of it when it's in a tableau pile
+    #getCardsMovingWith(gameObject: Phaser.GameObjects.Image): Phaser.GameObjects.Image[] {
+        const tableauPileIndex = gameObject.getData('pileIndex') as number | undefined
+        if (tableauPileIndex === undefined) {
+            return [gameObject]
         }
-        return 0
+
+        const cardIndex = gameObject.getData('cardIndex') as number
+        return this.#tableauContainers[tableauPileIndex].list.slice(cardIndex) as Phaser.GameObjects.Image[]
     }
 
     #createDropZones(): void {
@@ -481,6 +519,8 @@ export class Game extends Phaser.Scene {
                 }
 
                 if (isValidMove) {
+                    // the discard pile game object stays put to show the next card, so it goes back without sliding
+                    gameObject.setPosition(gameObject.getData('x') as number, gameObject.getData('y') as number)
                     this.#handleMoveCompleted()
                 }
             },
@@ -501,6 +541,11 @@ export class Game extends Phaser.Scene {
         this.#renderBoard()
         this.#updateHud()
 
+        if (!this.#isGameRecorded) {
+            this.#stats.recordGameStarted()
+            this.#isGameRecorded = true
+        }
+
         if (!this.#solitaire.wonGame) {
             return
         }
@@ -508,12 +553,112 @@ export class Game extends Phaser.Scene {
         this.timerRunning = false;
         this.timerEvent.remove(false);
 
+        const winData: WinData = {
+            moves: this.#solitaire.numberOfMoves,
+            score: this.#solitaire.score,
+            time: this.elapsedTime,
+            stats: this.#stats,
+            ...this.#stats.recordWin(this.#solitaire.score, this.elapsedTime),
+        }
+        // let the last card land on its foundation before the cards start bouncing off
+        this.time.delayedCall(CARD_FLY_DURATION + 100, () => this.#playWinCascade(() => this.#showWinScreen(winData)))
+    }
+
+    #showWinScreen(winData: WinData): void {
         this.cameras.main.fadeOut(1000, 0, 0, 0, (camera: Phaser.Cameras.Scene2D.Camera, progress: number) => {
             if (progress !== 1) {
                 return
             }
-            this.scene.start(SCENE_KEYS.WIN, { moves: this.#solitaire.numberOfMoves, time: formatTime(this.elapsedTime), score: this.#solitaire.score })
+            this.scene.start(SCENE_KEYS.WIN, winData)
         })
+    }
+
+    /**
+     * The classic win celebration: the cards bounce off the foundations one at a time, leaving trails behind them.
+     * Tapping anywhere skips straight to the win screen.
+     */
+    #playWinCascade(onDone: () => void): void {
+        // the trails cover the whole board, so they also catch every tap before the buttons underneath can
+        const trails = this.add
+            .renderTexture(0, 0, this.scale.width, this.scale.height)
+            .setOrigin(0)
+            .setDepth(200)
+            .setInteractive()
+        this.add.text(this.scale.width / 2, this.scale.height - 70, 'Tap to continue', labelStyle).setOrigin(0.5).setDepth(201)
+
+        // the cards leave from the top of the foundations, taking turns between the four piles
+        const cardsToLaunch: { pileIndex: number; value: number }[] = []
+        for (let value = 13; value > 0; value -= 1) {
+            this.#solitaire.foundationPiles.forEach((pile, pileIndex) => {
+                if (pile.value >= value) {
+                    cardsToLaunch.push({ pileIndex, value })
+                }
+            })
+        }
+
+        const cardWidth = CARD_WIDTH * SCALE
+        const cardHeight = CARD_HEIGHT * SCALE
+        let bouncingCards: { frame: number; x: number; y: number; velocityX: number; velocityY: number }[] = []
+        let step = 0
+        let timeToCatchUp = 0
+        let isDone = false
+
+        // moves the cards on by one step, stamping a trail for each; only called between trails.beginDraw/endDraw
+        const moveCards = () => {
+            const launch = step % CASCADE_LAUNCH_INTERVAL === 0 ? cardsToLaunch.shift() : undefined
+            step += 1
+            if (launch !== undefined) {
+                const suitFrame = SUIT_FRAMES[this.#solitaire.foundationPiles[launch.pileIndex].suit]
+                bouncingCards.push({
+                    frame: suitFrame + launch.value - 1,
+                    x: FOUNDATION_PILE_X_POSITIONS[launch.pileIndex],
+                    y: FOUNDATION_PILE_Y_POSITION,
+                    velocityX: Phaser.Math.Between(7, 13) * (Math.random() < 0.5 ? -1 : 1),
+                    velocityY: Phaser.Math.FloatBetween(-12, -2),
+                })
+                // the foundation now shows the card underneath
+                this.#foundationPileCards[launch.pileIndex].setVisible(launch.value > 1).setFrame(suitFrame + launch.value - 2)
+            }
+
+            bouncingCards.forEach((card) => {
+                card.velocityY += CASCADE_GRAVITY
+                card.x += card.velocityX
+                card.y += card.velocityY
+                if (card.y + cardHeight > this.scale.height) {
+                    card.y = this.scale.height - cardHeight
+                    card.velocityY *= -CASCADE_BOUNCE
+                }
+                trails.stamp(ASSET_KEYS.CARDS, card.frame, card.x, card.y, { originX: 0, originY: 0, scale: SCALE, skipBatch: true })
+            })
+            // a card is done once it leaves the side of the screen
+            bouncingCards = bouncingCards.filter((card) => card.x > -cardWidth && card.x < this.scale.width)
+        }
+
+        const update = (_time: number, delta: number) => {
+            timeToCatchUp = Math.min(timeToCatchUp + delta, CASCADE_STEP_TIME * CASCADE_MAX_STEPS_PER_FRAME)
+            // draw all of this frame's trails in one go, since drawing them one at a time is slow
+            trails.beginDraw()
+            while (timeToCatchUp >= CASCADE_STEP_TIME) {
+                timeToCatchUp -= CASCADE_STEP_TIME
+                moveCards()
+            }
+            trails.endDraw()
+
+            if (cardsToLaunch.length === 0 && bouncingCards.length === 0) {
+                finish()
+            }
+        }
+        this.events.on(Phaser.Scenes.Events.UPDATE, update)
+
+        const finish = () => {
+            if (isDone) {
+                return
+            }
+            isDone = true
+            this.events.off(Phaser.Scenes.Events.UPDATE, update)
+            onDone()
+        }
+        trails.once(Phaser.Input.Events.POINTER_DOWN, finish)
     }
 
     /**
