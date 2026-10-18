@@ -20,6 +20,14 @@ export const ASSET_KEYS = {
 export const CARD_WIDTH = 111
 export const CARD_HEIGHT = 156
 
+export function formatTime(seconds: number): string {
+    const minutes = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    const minutesStr = minutes.toString().padStart(2, '0');
+    const secondsStr = secs.toString().padStart(2, '0');
+    return `${minutesStr}:${secondsStr}`;
+}
+
 /**
  * Adds a text button that toggles fullscreen. Returns undefined when the browser can't go fullscreen (e.g. iPhone Safari).
  */
