@@ -1,5 +1,5 @@
 import * as Phaser from 'phaser'
-import { ASSET_KEYS, CARD_HEIGHT, CARD_WIDTH, SCENE_KEYS } from './Commons'
+import { ASSET_KEYS, CARD_HEIGHT, CARD_WIDTH, SCENE_KEYS, createFullscreenButton } from './Commons'
 import { Solitaire } from '../lib/solitaire'
 import { Card } from '../lib/card'
 import { FoundationPile } from '../lib/foundationPile'
@@ -17,13 +17,15 @@ const TABLEAU_PILE_X_POSITION = 200
 const TABLEAU_PILE_Y_POSITION = 320
 const TABLEAU_PILE_SPACER_X = 222
 const TABLEAU_PILE_SPACER_Y = 35
+const TABLEAU_PILE_FACE_DOWN_SPACER_Y = 15
+// tallest a tableau pile can get before it runs into the bottom banner
+const TABLEAU_PILE_MAX_HEIGHT = 660
 const SUIT_FRAMES = {
     HEART: 26,
     DIAMOND: 13,
     SPADE: 39,
     CLUB: 0,
 }
-let numberOfMoves = 0
 const textStyle = { font: '34px Raleway', fontStyle: 'bold', color: '#FFFEFF' }
 
 function formatTime(seconds: number): string {
@@ -53,6 +55,7 @@ export class Game extends Phaser.Scene {
     timerRunning: boolean = false;
     elapsedTime: number = 0;
     score: number = 0;
+    numberOfMoves: number = 0
     newGame!: Phaser.GameObjects.Text
 
     constructor() {
@@ -60,24 +63,6 @@ export class Game extends Phaser.Scene {
     }
 
     public create(): void {
-        if (!this.sys.game.device.os.desktop) {
-            let lastTap = 0
-            this.input.on('pointerup', (pointer: { event: { timeStamp: any } }) => {
-                let currentTime = pointer.event.timeStamp
-                let tapLength = currentTime - lastTap
-                if (tapLength < 300 && tapLength > 0) {
-                    if (this.scale.isFullscreen) {
-                        this.scale.stopFullscreen()
-                    } else {
-                        this.scale.startFullscreen()
-                    }
-                    lastTap = 0
-                } else {
-                    lastTap = currentTime
-                }
-            })
-        }
-
         this.cameras.main.fadeIn(1000)
         this.#solitaire = new Solitaire()
         this.#solitaire.newGame()
@@ -93,6 +78,7 @@ export class Game extends Phaser.Scene {
         this.elapsedTime = 0;
         this.timerRunning = true;
         this.score = 0
+        this.numberOfMoves = 0
         this.newGame = this.add.text(1520, TABLEAU_PILE_SPACER_Y + 980, 'New Game', textStyle).setInteractive({ useHandCursor: true })
 
         this.newGame.on('pointerdown', () => {
@@ -100,11 +86,12 @@ export class Game extends Phaser.Scene {
                 if (progress !== 1) {
                     return
                 }
-                numberOfMoves = 0;
                 this.scene.start(SCENE_KEYS.GAME);
             })
 
         });
+
+        createFullscreenButton(this, this.newGame.x - 60, this.newGame.y, textStyle)?.setOrigin(1, 0)
 
         this.timerText = this.add.text(this.scale.width / 2, TABLEAU_PILE_SPACER_Y + 996, '00:00', { font: '54px Raleway', fontStyle: 'bold', color: '#FFFEFF' }).setOrigin(.5)
 
@@ -123,9 +110,14 @@ export class Game extends Phaser.Scene {
         this.add.image(0, 0, ASSET_KEYS.TABLE).setOrigin(0).setDepth(-1)
         this.add.image(this.scale.width / 2, this.scale.height, ASSET_KEYS.BANNER).setOrigin(.5, 1).setDepth(-1)
 
-        this.moveCounterText = this.add.text(DRAW_PILE_X_POSITION + 80, TABLEAU_PILE_SPACER_Y + 980, 'Moves: ' + numberOfMoves,
+        this.moveCounterText = this.add.text(DRAW_PILE_X_POSITION + 80, TABLEAU_PILE_SPACER_Y + 980, 'Moves: ' + this.numberOfMoves,
             textStyle)
 
+    }
+
+    #incrementMoveCounter(): void {
+        this.numberOfMoves += 1
+        this.moveCounterText.setText('Moves: ' + this.numberOfMoves)
     }
 
     #createDrawPile(): void {
@@ -150,8 +142,7 @@ export class Game extends Phaser.Scene {
                 this.#solitaire.shuffleDiscardPile()
                 this.#discardPileCards.forEach((card) => card.setVisible(false))
                 this.#showCardsInDrawPile()
-                numberOfMoves += 1
-                this.moveCounterText.setText('Moves: ' + numberOfMoves);
+                this.#incrementMoveCounter()
                 return
             }
 
@@ -160,8 +151,7 @@ export class Game extends Phaser.Scene {
             this.#discardPileCards[0].setFrame(this.#discardPileCards[1].frame).setVisible(this.#discardPileCards[1].visible)
             const card = this.#solitaire.discardPile[this.#solitaire.discardPile.length - 1]
             this.#discardPileCards[1].setFrame(this.#getCardFrame(card)).setVisible(true)
-            numberOfMoves += 1
-            this.moveCounterText.setText('Moves: ' + numberOfMoves);
+            this.#incrementMoveCounter()
         })
 
         if (DEBUG) {
@@ -196,13 +186,40 @@ export class Game extends Phaser.Scene {
             const tableauContainer = this.add.container(x, TABLEAU_PILE_Y_POSITION, [])
             this.#tableauContainers.push(tableauContainer)
             pile.forEach((card, cardIndex) => {
-                const cardGameObject = this.#createCard(0, cardIndex * TABLEAU_PILE_SPACER_Y, false, cardIndex, pileIndex)
+                const cardGameObject = this.#createCard(0, 0, false, cardIndex, pileIndex)
                 tableauContainer.add(cardGameObject)
                 if (card.isFaceUp) {
                     cardGameObject.setFrame(this.#getCardFrame(card))
                     this.input.setDraggable(cardGameObject)
                 }
             })
+            this.#layoutTableauPile(pileIndex)
+        })
+    }
+
+    /**
+     * Positions every card in a tableau pile. Face down cards are stacked tighter than face up cards, and face up cards
+     * are squeezed together when a long pile would otherwise run into the bottom banner.
+     */
+    #layoutTableauPile(pileIndex: number): void {
+        const pile = this.#solitaire.tableauPiles[pileIndex]
+        const numberOfFaceDownCards = pile.filter((card) => !card.isFaceUp).length
+        const numberOfFaceUpGaps = pile.length - numberOfFaceDownCards - 1
+
+        let faceUpSpacerY = TABLEAU_PILE_SPACER_Y
+        if (numberOfFaceUpGaps > 0) {
+            const spaceForFaceUpGaps =
+                TABLEAU_PILE_MAX_HEIGHT - CARD_HEIGHT * SCALE - numberOfFaceDownCards * TABLEAU_PILE_FACE_DOWN_SPACER_Y
+            faceUpSpacerY = Math.min(TABLEAU_PILE_SPACER_Y, Math.floor(spaceForFaceUpGaps / numberOfFaceUpGaps))
+        }
+
+        let y = 0
+        pile.forEach((card, cardIndex) => {
+            this.#tableauContainers[pileIndex]
+                .getAt<Phaser.GameObjects.Image>(cardIndex)
+                .setPosition(0, y)
+                .setData({ x: 0, y, cardIndex, pileIndex })
+            y += card.isFaceUp ? faceUpSpacerY : TABLEAU_PILE_FACE_DOWN_SPACER_Y
         })
     }
 
@@ -265,9 +282,11 @@ export class Game extends Phaser.Scene {
                 if (tableauPileIndex !== undefined) {
                     const numberOfCardsToMove = this.#getNumberOfCardsToMoveAsPartOfStack(tableauPileIndex, cardIndex)
                     for (let i = 1; i <= numberOfCardsToMove; i += 1) {
-                        this.#tableauContainers[tableauPileIndex]
-                            .getAt<Phaser.GameObjects.Image>(cardIndex + i)
-                            .setPosition(dragX, dragY + TABLEAU_PILE_SPACER_Y * i)
+                        const cardToMove = this.#tableauContainers[tableauPileIndex].getAt<Phaser.GameObjects.Image>(
+                            cardIndex + i,
+                        )
+                        const offsetY = (cardToMove.getData('y') as number) - (gameObject.getData('y') as number)
+                        cardToMove.setPosition(dragX, dragY + offsetY)
                     }
                 }
             },
@@ -326,9 +345,9 @@ export class Game extends Phaser.Scene {
 
         for (let i = 0; i < 7; i += 1) {
             zone = this.add
-                .zone(TABLEAU_PILE_X_POSITION + i * TABLEAU_PILE_SPACER_X, TABLEAU_PILE_Y_POSITION, CARD_WIDTH * SCALE, 585)
+                .zone(TABLEAU_PILE_X_POSITION + i * TABLEAU_PILE_SPACER_X, TABLEAU_PILE_Y_POSITION, CARD_WIDTH * SCALE, TABLEAU_PILE_MAX_HEIGHT)
                 .setOrigin(0)
-                .setRectangleDropZone(CARD_WIDTH * SCALE, 585)
+                .setRectangleDropZone(CARD_WIDTH * SCALE, TABLEAU_PILE_MAX_HEIGHT)
                 .setData({
                     zoneType: ZONE_TYPE.TABLEAU,
                     tableauIndex: i,
@@ -373,26 +392,25 @@ export class Game extends Phaser.Scene {
             isValidMove = this.#solitaire.playDiscardPileCardToFoundation()
             isCardFromDiscardPile = true
         } else {
-            isValidMove = this.#solitaire.moveTableauCardToFoundation(tableauPileIndex)
+            isValidMove = this.#solitaire.moveTableauCardToFoundation(
+                tableauPileIndex,
+                gameObject.getData('cardIndex') as number,
+            )
         }
 
         if (!isValidMove) {
             return
         } else {
             this.#playCardDrop()
-            numberOfMoves += 1
-            this.moveCounterText.setText('Moves: ' + numberOfMoves);
+            this.#incrementMoveCounter()
             this.score += 10
         }
 
         if (isCardFromDiscardPile) {
             this.#updateCardGameObjectsInDiscardPile()
         } else {
-            this.#handleRevealingNewTableauCards(tableauPileIndex as number)
-        }
-
-        if (!isCardFromDiscardPile) {
             gameObject.destroy()
+            this.#handleRevealingNewTableauCards(tableauPileIndex as number)
         }
         this.#updateFoundationPiles()
     }
@@ -419,23 +437,17 @@ export class Game extends Phaser.Scene {
             return
         } else {
             this.#playCardDrop()
-            numberOfMoves += 1
-            this.moveCounterText.setText('Moves: ' + numberOfMoves);
+            this.#incrementMoveCounter()
             if (isCardFromDiscardPile) {
                 this.score += 5;
             }
         }
 
         if (isCardFromDiscardPile) {
-            const card = this.#createCard(
-                0,
-                originalTargetPileSize * TABLEAU_PILE_SPACER_Y,
-                true,
-                originalTargetPileSize,
-                targetTableauPileIndex,
-            )
+            const card = this.#createCard(0, 0, true, originalTargetPileSize, targetTableauPileIndex)
             card.setFrame(gameObject.frame)
             this.#tableauContainers[targetTableauPileIndex].add(card)
+            this.#layoutTableauPile(targetTableauPileIndex)
             this.#updateCardGameObjectsInDiscardPile()
             return
         }
@@ -446,15 +458,8 @@ export class Game extends Phaser.Scene {
                 this.#tableauContainers[tableauPileIndex as number].getAt<Phaser.GameObjects.Image>(tableauCardIndex)
             this.#tableauContainers[tableauPileIndex as number].removeAt(tableauCardIndex)
             this.#tableauContainers[targetTableauPileIndex].add(cardGameObject)
-
-            const cardIndex = originalTargetPileSize + i
-            cardGameObject.setData({
-                x: 0,
-                y: cardIndex * TABLEAU_PILE_SPACER_Y,
-                cardIndex,
-                pileIndex: targetTableauPileIndex,
-            })
         }
+        this.#layoutTableauPile(targetTableauPileIndex)
 
         this.#tableauContainers[tableauPileIndex as number].setDepth(0)
 
@@ -484,6 +489,7 @@ export class Game extends Phaser.Scene {
             cardGameObject.setFrame(this.#getCardFrame(tableauCard))
             this.input.setDraggable(cardGameObject)
         }
+        this.#layoutTableauPile(tableauPileIndex)
     }
 
     #updateFoundationPiles(): void {
@@ -504,7 +510,7 @@ export class Game extends Phaser.Scene {
                 }
                 const deduction = Math.floor((this.elapsedTime / 10) * 2)
                 const finalScore = this.score - deduction
-                this.scene.start(SCENE_KEYS.WIN, { moves: numberOfMoves, time: formatTime(this.elapsedTime), score: finalScore })
+                this.scene.start(SCENE_KEYS.WIN, { moves: this.numberOfMoves, time: formatTime(this.elapsedTime), score: finalScore })
             })
         }
     }
